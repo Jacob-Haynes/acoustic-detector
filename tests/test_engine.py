@@ -24,7 +24,7 @@ def test_simulated_drone_pass_alerts_once(settings):
     kinds = [x["kind"] for x in e.log]
     assert kinds.count("detect") == 1, kinds
     assert mesh.texts and mesh.texts[0].startswith("ACOUSTIC: drone detected conf ")
-    assert mesh.texts[0].endswith("@ OP1")
+    assert mesh.texts[0].endswith("@ MIC1")
     assert len(mesh.texts) == 1                  # no alerts for lawnmower / generator
     assert any("a-u-A-M-F-Q" in m for m in cot.messages)
     assert (settings.data_dir / "detections.jsonl").exists()

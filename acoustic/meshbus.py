@@ -1,4 +1,4 @@
-"""MQTT on the Pi hub: mesh alerts via the blufor-tracker bridge, plus the isrkit heartbeat.
+"""MQTT on the Pi hub: mesh alerts via the mesh bridge, plus the isrkit heartbeat.
 Never touches the Meshtastic serial port.
 
 Publishes {"text", "to", "channel", "source"} to meshbus/tx. If the broker is down the message is

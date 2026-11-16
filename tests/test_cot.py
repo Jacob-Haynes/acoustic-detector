@@ -7,13 +7,13 @@ from acoustic import cot
 
 
 def test_detection_event_is_valid_cot():
-    xml = cot.detection_event("OP1", 51.15, -1.75, 100.0, 0.87, 300.0, "u", 380.0, source="mic", now=0)
+    xml = cot.detection_event("MIC1", 52.0, -1.0, 100.0, 0.87, 300.0, "u", 380.0, source="mic", now=0)
     root = ET.fromstring(xml.encode())
     assert root.tag == "event" and root.get("version") == "2.0"
     assert root.get("type") == "a-u-A-M-F-Q"
-    assert root.get("uid") == "ACOUSTIC-OP1-UAV"
+    assert root.get("uid") == "ACOUSTIC-MIC1-UAV"
     pt = root.find("point")
-    assert float(pt.get("lat")) == 51.15 and float(pt.get("lon")) == -1.75
+    assert float(pt.get("lat")) == 52.0 and float(pt.get("lon")) == -1.0
     assert float(pt.get("ce")) == 300.0
     remarks = root.find("detail/remarks").text
     assert "ACOUSTIC" in remarks and "0.87" in remarks and "SENSOR position" in remarks
@@ -28,9 +28,9 @@ def test_hostile_affiliation_and_escaping():
 
 
 def test_sensor_event():
-    root = ET.fromstring(cot.sensor_event("OP1", 1.0, 2.0, 3.0, "listening").encode())
+    root = ET.fromstring(cot.sensor_event("MIC1", 1.0, 2.0, 3.0, "listening").encode())
     assert root.get("type") == "a-f-G-E-S"
-    assert root.find("detail/contact").get("callsign") == "ACOUSTIC OP1"
+    assert root.find("detail/contact").get("callsign") == "ACOUSTIC MIC1"
 
 
 def _free_port():
@@ -70,38 +70,38 @@ def test_client_delivers_and_reconnects():
     t = threading.Thread(target=accept, daemon=True)
     t.start()
     c = cot.CotClient("127.0.0.1", port, max_backoff=0.2).start()
-    c.send(cot.sensor_event("OP1", 1, 2, 3, "test"))
+    c.send(cot.sensor_event("MIC1", 1, 2, 3, "test"))
     t.join(5)
     srv.close()
     c.stop()
-    assert received and "ACOUSTIC-OP1" in received[0]
+    assert received and "ACOUSTIC-MIC1" in received[0]
 
 
 def test_remarks_prefix_c43():
-    sim = ET.fromstring(cot.detection_event("OP1", 51.1, -1.7, 0, 0.8, 300, source="simulate").encode())
+    sim = ET.fromstring(cot.detection_event("MIC1", 52.0, -1.0, 0, 0.8, 300, source="simulate").encode())
     assert sim.find("detail/remarks").text.startswith("SIMULATED: ")
-    rec = ET.fromstring(cot.detection_event("OP1", 51.1, -1.7, 0, 0.8, 300, source="file").encode())
+    rec = ET.fromstring(cot.detection_event("MIC1", 52.0, -1.0, 0, 0.8, 300, source="file").encode())
     assert rec.find("detail/remarks").text.startswith("RECORDED: ")
-    live = ET.fromstring(cot.detection_event("OP1", 51.1, -1.7, 0, 0.8, 300, source="mic").encode())
+    live = ET.fromstring(cot.detection_event("MIC1", 52.0, -1.0, 0, 0.8, 300, source="mic").encode())
     assert live.find("detail/remarks").text.startswith("ACOUSTIC drone detection")
-    marker = ET.fromstring(cot.sensor_event("OP1", 51.1, -1.7, 0, "listening", source="simulate").encode())
+    marker = ET.fromstring(cot.sensor_event("MIC1", 52.0, -1.0, 0, "listening", source="simulate").encode())
     assert marker.find("detail/remarks").text.startswith("SIMULATED: ")
-    assert ET.fromstring(cot.sensor_event("OP1", 1, 2, 3, "x").encode()).find("detail/remarks").text.startswith("Acoustic")
+    assert ET.fromstring(cot.sensor_event("MIC1", 1, 2, 3, "x").encode()).find("detail/remarks").text.startswith("Acoustic")
 
 
 def test_valid_position_c42():
     assert not cot.valid_position(None, None)
     assert not cot.valid_position(0.0, 0.0)
     assert not cot.valid_position(95.0, 1.0)
-    assert cot.valid_position(51.15, -1.75)
-    assert cot.valid_position(0.0, -1.75)          # equator is a real place
+    assert cot.valid_position(52.0, -1.0)
+    assert cot.valid_position(0.0, -1.0)          # equator is a real place
 
 
 def test_cot_rate_limit_per_uid_c44():
     t = [0.0]
     c = cot.CotClient("127.0.0.1", 1, clock=lambda: t[0])       # not started: just queues
-    det = cot.detection_event("OP1", 51.1, -1.7, 0, 0.8, 300)
-    marker = cot.sensor_event("OP1", 51.1, -1.7, 0, "listening")
+    det = cot.detection_event("MIC1", 52.0, -1.0, 0, 0.8, 300)
+    marker = cot.sensor_event("MIC1", 52.0, -1.0, 0, "listening")
     assert c.send(det)
     assert c.send(marker)                  # different uid: allowed
     t[0] = 4.9

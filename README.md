@@ -1,8 +1,8 @@
 # acoustic-detector
 
 A Raspberry Pi 5 microphone sensor that hears a nearby drone and reports it: an ATAK marker
-(CoT over TCP to OpenTAKServer) and a Meshtastic text via the blufor-tracker mesh bridge. Built as
-an "art of the possible" ISR training demo. It is a sensor only: it never controls, steers or
+(CoT over TCP to OpenTAKServer) and a Meshtastic text via a mesh bridge. Built as
+a drone-sound detection demo. It is a sensor only: it never controls, steers or
 engages anything.
 
 Everything runs on the Pi CPU. No Hailo, no internet needed. Google Gemini is an optional
@@ -30,9 +30,9 @@ On a detection:
 - **ATAK**: a CoT `a-u-A-M-F-Q` (unknown UAV; set `COT_AFFILIATION=h` for hostile) placed **at the
   sensor's position**, with `ce` set to the detection radius and a remarks field stating that it
   shows presence near the sensor, not the target's location. While the detection stays active the
-  marker is re-sent every 15 s. A friendly sensor-point marker (`a-f-G-E-S`, "ACOUSTIC OP1") is sent
+  marker is re-sent every 15 s. A friendly sensor-point marker (`a-f-G-E-S`, "ACOUSTIC MIC1") is sent
   every 60 s.
-- **Mesh**: `{"text": "ACOUSTIC: drone detected conf 0.87 @ OP1", "to": null, "channel": 0,
+- **Mesh**: `{"text": "ACOUSTIC: drone detected conf 0.87 @ MIC1", "to": null, "channel": 0,
   "source": "acoustic-detector"}` published to `meshbus/tx` on 127.0.0.1:1883. The mesh bridge owns
   the radio, and this tool never opens the serial port.
 - **Labelling**: in `--simulate` the CoT remarks (detection and sensor marker) start with
@@ -79,7 +79,7 @@ needs no drivers on Pi OS or macOS.
   CoreAudio delivers 16 kHz directly. `AUDIO_RATE=48000` forces the native rate if you want it.
 - **Pattern.** It has two capsules and two patterns: **cardioid** (picks up from the front) and
   **omni**. For the office demo use **cardioid**, with the front of the mic facing the speaker
-  playing drone audio. This rejects some room noise from behind. At a field OP, where the drone
+  playing drone audio. This rejects some room noise from behind. Outdoors, where the drone
   could come from anywhere, **omni** is the better choice. The pattern is switched in Logitech G
   HUB / Blue Sherpa on a Mac or PC. Whether it stays set once the mic is moved to the Pi isn't
   verified here, so check the setting before the demo.
@@ -116,7 +116,7 @@ sudo pi-profiles acoustic-detector   # mic sensor on its own
 journalctl -u acoustic-detector -f
 ```
 
-ATAK markers need OpenTAKServer (`opentakserver`), and mesh alerts need the blufor-tracker bridge
+ATAK markers need OpenTAKServer (`opentakserver`), and mesh alerts need the mesh bridge
 (`mesh-bridge`) plus RabbitMQ. Combined scenario profiles that run this sensor alongside them are
 defined in the pi-platform (pi-profiles) repo, not here.
 
@@ -157,7 +157,7 @@ has changed.
 
 ## Running on a laptop
 
-The Pi at the OP is the normal setup. A laptop is the fallback for when the USB mic misbehaves on
+The Pi at the sensor position is the normal setup. A laptop is the fallback for when the USB mic misbehaves on
 the day. It uses the laptop's built-in mic and still reports to the Pi hub over the hotspot.
 
 1. Join the Pi's hotspot (the hub is `isr-pi.local`, 192.168.4.1).
@@ -257,7 +257,7 @@ laptop or Bluetooth speaker about 1–2 m from the mic, starting at **low volume
 3. **Approach.** Play the drone clip and slowly raise the volume. The stacked horizontal lines of
    the prop comb appear on the waterfall. The *Prop comb* and *My drone* bars rise, and when the
    confidence crosses the red tick for 1.5 s the banner goes **DRONE DETECTED**. The ATAK marker and
-   the mesh text `ACOUSTIC: drone detected conf … @ OP1` follow immediately.
+   the mesh text `ACOUSTIC: drone detected conf … @ MIC1` follow immediately.
 4. **Recede.** Lower the volume and the confidence falls. About 3 s below the amber tick, the log
    shows `clear`.
 5. **Cooldown.** Raise the volume again within 60 s: the log shows `suppressed` and no second mesh
@@ -304,8 +304,8 @@ before the demo.
    background clip with it disarmed.
 4. Land the quad about 150 m out. Fly it slowly **toward the Pi**. On the waterfall, the prop comb
    appears as stacked horizontal lines that bend with throttle. Confidence climbs and the banner goes
-   red with **DRONE DETECTED**. At the same moment the ATAK marker appears at the OP with its radius
-   ring, and the mesh node shows `ACOUSTIC: drone detected conf 0.8x @ OP1`.
+   red with **DRONE DETECTED**. At the same moment the ATAK marker appears at the sensor with its radius
+   ring, and the mesh node shows `ACOUSTIC: drone detected conf 0.8x @ MIC1`.
 5. Fly away again: after about 3 s below threshold it clears. Fly back within 60 s and the log shows
    `suppressed` with no second mesh text. *"That's the cooldown, so the mesh isn't spammed."*
 6. Optional: press **Ask Gemini** to show a cloud second opinion next to the on-device result.
@@ -346,8 +346,8 @@ Set `GEMINI_API_KEY` (and optionally `GEMINI_MODEL`, default `gemini-3.8-flash`)
 and **Ask Gemini** sends the last 4 s on demand (at most once every 30 s automatically). The verdict
 is shown in its own panel and never changes the on-device confidence or alerts.
 
-**Cloud mode uploads audio to Google.** Use it only with demo audio. Never use it on an exercise
-or operation where the sound environment (voices, vehicles, location cues) is sensitive. If the
+**Cloud mode uploads audio to Google.** Use it only with demo audio. Never use it with recordings
+where the sound environment (voices, vehicles, location cues) is sensitive. If the
 key isn't set, the UI shows **OFFLINE** and nothing leaves the Pi.
 
 ## Configuration
@@ -376,4 +376,8 @@ profiles.d/          pi-profiles config for this tool only (combined profiles li
 tests/               pytest
 ```
 
-YAMNet model and class map © Google, Apache-2.0.
+## License
+
+MIT, see [LICENSE](LICENSE). The YAMNet model (downloaded at install, not committed) and
+`acoustic/data/yamnet_class_map.csv` come from Google under the Apache 2.0 licence. No audio
+recordings are committed: tests and `--simulate` use synthetic signals only.

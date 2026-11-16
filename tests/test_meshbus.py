@@ -5,8 +5,8 @@ from acoustic import meshbus
 
 
 def test_payload_contract():
-    p = meshbus.build_payload(meshbus.alert_text(0.873, "OP1"))
-    assert p == {"text": "ACOUSTIC: drone detected conf 0.87 @ OP1", "to": None, "channel": 0,
+    p = meshbus.build_payload(meshbus.alert_text(0.873, "MIC1"))
+    assert p == {"text": "ACOUSTIC: drone detected conf 0.87 @ MIC1", "to": None, "channel": 0,
                  "source": "acoustic-detector"}
 
 
@@ -40,8 +40,8 @@ def test_publishes_to_meshbus_tx():
     bus = meshbus.MeshBus("127.0.0.1", 1883, "guest", "guest", to="!1234", channel=1)
     bus._client = FakeClient()
     bus.connected = True
-    assert bus.send("ACOUSTIC: drone detected conf 0.90 @ OP1")
-    assert published == [("meshbus/tx", {"text": "ACOUSTIC: drone detected conf 0.90 @ OP1",
+    assert bus.send("ACOUSTIC: drone detected conf 0.90 @ MIC1")
+    assert published == [("meshbus/tx", {"text": "ACOUSTIC: drone detected conf 0.90 @ MIC1",
                                           "to": "!1234", "channel": 1, "source": "acoustic-detector"})]
 
 
@@ -93,20 +93,20 @@ def test_heartbeat_published_retained_and_stopped_on_exit():
 
 
 def test_station_host_c41(monkeypatch):
-    monkeypatch.setattr(meshbus.socket, "gethostname", lambda: "Field-Laptop.local")
+    monkeypatch.setattr(meshbus.socket, "gethostname", lambda: "Station-01.local")
     monkeypatch.delenv("ISR_HOST", raising=False)
-    assert meshbus.station_host() == "field-laptop"
+    assert meshbus.station_host() == "station-01"
     monkeypatch.setenv("ISR_HOST", "isr-droneops")
     assert meshbus.station_host() == "isr-droneops"
     assert meshbus.advertised_url(8100) == "http://isr-droneops.local:8100"
 
 
 def test_mesh_tags_c43():
-    assert meshbus.alert_text(0.9, "OP1", "simulate").startswith("[SIM] ACOUSTIC: drone detected")
-    assert meshbus.alert_text(0.9, "OP1", "file").startswith("[REC] ACOUSTIC:")
-    assert meshbus.alert_text(0.9, "OP1", "mic").startswith("ACOUSTIC:")      # live: no tag
-    assert meshbus.clear_text("OP1", 0.8, "simulate").startswith("[SIM] ")
-    assert meshbus.test_text("OP1", "file").startswith("[REC] ")
+    assert meshbus.alert_text(0.9, "MIC1", "simulate").startswith("[SIM] ACOUSTIC: drone detected")
+    assert meshbus.alert_text(0.9, "MIC1", "file").startswith("[REC] ACOUSTIC:")
+    assert meshbus.alert_text(0.9, "MIC1", "mic").startswith("ACOUSTIC:")      # live: no tag
+    assert meshbus.clear_text("MIC1", 0.8, "simulate").startswith("[SIM] ")
+    assert meshbus.test_text("MIC1", "file").startswith("[REC] ")
 
 
 def test_mesh_rate_limit_c44():

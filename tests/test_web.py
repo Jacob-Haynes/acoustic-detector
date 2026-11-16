@@ -24,7 +24,7 @@ def test_status_shows_modes(client):
     s = client.get("/api/status").json()
     assert s["gemini"]["enabled"] is False
     assert s["detector"]["yamnet"] is False
-    assert s["sensor"]["name"] == "OP1"
+    assert s["sensor"]["name"] == "MIC1"
     assert s["waterfall"]["bins"] == 128
 
 

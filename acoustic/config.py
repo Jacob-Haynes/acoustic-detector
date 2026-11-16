@@ -11,8 +11,8 @@ WINDOW_SAMPLES = 15600       # 0.975 s analysis window (YAMNet's fixed input siz
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
 # Demo coordinates used in --simulate when no sensor position is configured.
-DEMO_LAT = 51.1500
-DEMO_LON = -1.7500
+DEMO_LAT = 52.0000
+DEMO_LON = -1.0000
 
 
 def _env(name: str, default: str | None = None) -> str | None:
@@ -65,7 +65,7 @@ def _default_data_dir() -> Path:
 
 @dataclass
 class Settings:
-    sensor_name: str = "OP1"
+    sensor_name: str = "MIC1"
     sensor_lat: float | None = None
     sensor_lon: float | None = None
     sensor_hae: float = 0.0

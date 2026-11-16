@@ -28,7 +28,7 @@ def noise(seconds=1.0, level=0.02, seed=1):
 def settings(tmp_path):
     s = Settings()
     s.data_dir = tmp_path
-    s.sensor_lat, s.sensor_lon = 51.15, -1.75
+    s.sensor_lat, s.sensor_lon = 52.0, -1.0
     s.use_yamnet = False
     return s
 

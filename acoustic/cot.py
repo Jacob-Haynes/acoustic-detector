@@ -61,7 +61,7 @@ def detection_event(sensor_name: str, lat: float, lon: float, hae: float, confid
                     source: str = "", now: float | None = None) -> str:
     """UAV marker placed at the sensor (acoustics gives presence, not position). ce = rough range."""
     uid = f"ACOUSTIC-{sensor_name}-UAV"
-    cot_type = f"a-{affiliation}-A-M-F-Q"        # air / military / fixed... -Q = UAV/drone
+    cot_type = f"a-{affiliation}-A-M-F-Q"        # standard CoT air type; -A-M-F-Q = UAV/drone
     remarks = remarks_prefix(source) + (
         f"ACOUSTIC drone detection by sensor {sensor_name}. conf {confidence:.2f}. "
         f"Marker is the SENSOR position: target is within ~{radius_m:.0f} m, bearing unknown."

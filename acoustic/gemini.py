@@ -17,7 +17,7 @@ from acoustic.config import SAMPLE_RATE
 logger = logging.getLogger(__name__)
 
 PROMPT = (
-    "You are assisting an acoustic sensor used in a military training demo for detecting small "
+    "You are assisting an acoustic sensor used in a drone-sound detection demo for detecting small "
     "drones (for example a 5-inch FPV quadcopter). Listen to this short clip recorded by a "
     "ground microphone. Decide whether a multirotor drone is audible. Common confusers are "
     "lawnmowers, generators, power tools, vehicles, insects and wind. Reply with JSON only: "
