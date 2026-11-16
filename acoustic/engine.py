@@ -172,6 +172,12 @@ class Engine:
     def source_kind(self) -> str:
         return getattr(self.source, "kind", "") or ""
 
+    @property
+    def _parent_uid(self) -> str | None:
+        """Our TAK registration (EUD) uid, linked from markers so OTS files them under it."""
+        uid = getattr(self.cot, "uid", None)
+        return uid if isinstance(uid, str) else None
+
     def _handle_event(self, event):
         entry = event.as_dict()
         self._append_log(entry)
@@ -209,7 +215,8 @@ class Engine:
         src = self.source_kind
         self.cot.send(cot.detection_event(self.s.sensor_name, self.s.sensor_lat, self.s.sensor_lon,
                                           self.s.sensor_hae, confidence, self.s.detect_radius_m,
-                                          self.s.cot_affiliation, f0, source=src))
+                                          self.s.cot_affiliation, f0, source=src,
+                                          parent_uid=self._parent_uid))
 
     def _periodic_outputs(self, now: float):
         if self.cot is None or not self.s.has_position:
@@ -218,7 +225,8 @@ class Engine:
             self._last_sensor_marker = now
             status = "DRONE DETECTED" if self.hyst.active else "listening"
             self.cot.send(cot.sensor_event(self.s.sensor_name, self.s.sensor_lat, self.s.sensor_lon,
-                                           self.s.sensor_hae, status, source=self.source_kind))
+                                           self.s.sensor_hae, status, source=self.source_kind,
+                                           parent_uid=self._parent_uid))
         if self.hyst.active and now - self._last_active_send >= ACTIVE_RESEND_S:
             self._send_detection_cot(self.hyst.smoothed, self.state.get("spectral", {}).get("f0_hz", 0.0))
 
@@ -290,7 +298,8 @@ class Engine:
         cot_sent = False
         if self.cot is not None and self.s.has_position:
             self.cot.send(cot.sensor_event(self.s.sensor_name, self.s.sensor_lat, self.s.sensor_lon,
-                                           self.s.sensor_hae, "TEST alert", source=self.source_kind))
+                                           self.s.sensor_hae, "TEST alert", source=self.source_kind,
+                                           parent_uid=self._parent_uid))
             cot_sent = True
         self._append_log({"kind": "test", "ts": time.time(), "confidence": 0.0})
         return {"mesh_sent": mesh_ok, "cot_queued": cot_sent}

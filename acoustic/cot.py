@@ -36,22 +36,28 @@ def isotime(ts: float) -> str:
 
 def build_event(uid: str, cot_type: str, lat: float, lon: float, hae: float, callsign: str,
                 remarks: str, stale_s: float, ce: float = 10.0, how: str = "m-g",
-                now: float | None = None) -> str:
+                now: float | None = None, parent_uid: str | None = None) -> str:
+    """A marker OTS 1.8.3 both relays and stores (contract C5.5): a-* type, no <takv>, no contact
+    endpoint, a real position (callers never send 0,0), and a <link> only to our own EUD uid."""
     now = time.time() if now is None else now
+    link = ""
+    if parent_uid:
+        link = (f'<link uid={quoteattr(parent_uid)} relation="p-p" type="a-f-G-E-S"'
+                f' production_time="{isotime(now)}"/>')
     return (
         '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
         f'<event version="2.0" uid={quoteattr(uid)} type={quoteattr(cot_type)} how={quoteattr(how)}'
         f' time="{isotime(now)}" start="{isotime(now)}" stale="{isotime(now + stale_s)}">'
         f'<point lat="{lat:.6f}" lon="{lon:.6f}" hae="{hae:.1f}" ce="{ce:.1f}" le="9999999.0"/>'
         f'<detail><contact callsign={quoteattr(callsign)}/>'
-        f"<remarks>{escape(remarks)}</remarks></detail>"
+        f"<remarks>{escape(remarks)}</remarks>{link}</detail>"
         "</event>"
     )
 
 
 def detection_event(sensor_name: str, lat: float, lon: float, hae: float, confidence: float,
                     radius_m: float, affiliation: str = "u", f0_hz: float = 0.0,
-                    source: str = "", now: float | None = None) -> str:
+                    source: str = "", now: float | None = None, parent_uid: str | None = None) -> str:
     """UAV marker placed at the sensor (acoustics gives presence, not position). ce = rough range."""
     uid = f"ACOUSTIC-{sensor_name}-UAV"
     cot_type = f"a-{affiliation}-A-M-F-Q"        # standard CoT air type; -A-M-F-Q = UAV/drone
@@ -65,12 +71,12 @@ def detection_event(sensor_name: str, lat: float, lon: float, hae: float, confid
         remarks += f" Input: {'live microphone' if source == 'mic' else source}."
     # how="m-f": machine-derived/fused rather than a measured target position.
     return build_event(uid, cot_type, lat, lon, hae, f"UAV? (acoustic {sensor_name})", remarks,
-                       DETECTION_STALE_S, ce=radius_m, how="m-f", now=now)
+                       DETECTION_STALE_S, ce=radius_m, how="m-f", now=now, parent_uid=parent_uid)
 
 
 def sensor_event(sensor_name: str, lat: float, lon: float, hae: float, status: str,
-                 source: str = "", now: float | None = None) -> str:
+                 source: str = "", now: float | None = None, parent_uid: str | None = None) -> str:
     uid = f"ACOUSTIC-{sensor_name}"
     remarks = remarks_prefix(source) + f"Acoustic drone sensor {sensor_name}: {status}"
     return build_event(uid, "a-f-G-E-S", lat, lon, hae, f"ACOUSTIC {sensor_name}", remarks,
-                       SENSOR_STALE_S, ce=5.0, how="h-e", now=now)
+                       SENSOR_STALE_S, ce=5.0, how="h-e", now=now, parent_uid=parent_uid)

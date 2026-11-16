@@ -4,6 +4,10 @@
 2. A client whose first <contact endpoint=...> arrives less than BIND_AFTER_S after connect is
    registered but never gets a receive queue (nothing is delivered to it).
 3. A new uid claiming a callsign another uid already holds is refused (and so is not registered).
+
+It also applies OTS's rules for *storing* a marker (shown on its web map), contract C5.5:
+type ^a-[fhupansjk]-[ZPAGSUF] or ^b-m-p (not b-m-p-s-p-loc), no <takv>, no <contact endpoint>,
+a real position (not 0,0), and any <link uid> must be a registered EUD uid.
 """
 
 import re
@@ -20,6 +24,26 @@ from acoustic.tak_client import TakClient, registration_event
 BIND_AFTER_S = 0.25      # fake server's async-channel delay (the real one is ~3 s)
 DELAY_OK = 0.35          # client delay longer than that
 EVENT_RE = re.compile(r"<event\b.*?</event>", re.S)
+STORABLE_TYPE = re.compile(r"^(a-[fhupansjk]-[ZPAGSUF]|b-m-p)")
+
+
+def storable(ev: ET.Element, eud_uids) -> str | None:
+    """None if OTS 1.8.3 would store this marker, else the reason it wouldn't."""
+    typ = ev.get("type", "")
+    if not STORABLE_TYPE.match(typ) or typ.startswith("b-m-p-s-p-loc"):
+        return f"type {typ}"
+    if ev.find("detail/takv") is not None:
+        return "has takv"
+    contact = ev.find("detail/contact")
+    if contact is not None and contact.get("endpoint"):
+        return "contact endpoint"
+    pt = ev.find("point")
+    if pt is None or (float(pt.get("lat")) == 0 and float(pt.get("lon")) == 0):
+        return "no position"
+    for link in ev.findall("detail/link"):
+        if link.get("uid") not in eud_uids:
+            return f"link to non-EUD {link.get('uid')}"
+    return None
 
 
 class FakeOTS:
@@ -34,6 +58,8 @@ class FakeOTS:
         self.dropped: list[str] = []             # reasons
         self.bound: list[str] = []               # uids whose receive queue got bound
         self.unbound: list[str] = []
+        self.stored: list[ET.Element] = []       # markers OTS would keep (web map)
+        self.not_stored: list[tuple[str, str]] = []   # (uid, reason)
         self.connections = 0
         self.conns: list[socket.socket] = []
         self.lock = threading.Lock()
@@ -86,6 +112,11 @@ class FakeOTS:
                         self.dropped.append(f"unregistered sender: {ev.get('uid')}")  # rule 1
                     else:
                         self.accepted.append((sender, ev))
+                        why = storable(ev, set(self.callsigns.values()))
+                        if why is None:
+                            self.stored.append(ev)
+                        else:
+                            self.not_stored.append((ev.get("uid"), why))
 
     def markers(self):
         with self.lock:
@@ -259,3 +290,44 @@ def test_rate_limit_per_uid_c44():
     t[0] = 5.1
     assert c.send(det())
     assert c.throttled == 2 and c._q.qsize() == 3
+
+
+def test_engine_markers_are_storable_c55(ots, settings):
+    """The engine's real detection, sensor and test markers, through TakClient, are all stored."""
+    from acoustic.engine import Engine
+    from acoustic.simulator import SCENARIO
+    from acoustic.sources import SimSource
+    from test_engine import run_sim
+
+    c = client(ots.port).start()
+    try:
+        e = Engine(settings, cot_client=c, source=SimSource())
+        run_sim(e, sum(d for _, d in SCENARIO))
+        e.test_alert()
+        assert wait_for(lambda: {"ACOUSTIC-MIC1-UAV", "ACOUSTIC-MIC1"} <= {m.get("uid") for m in ots.stored})
+        assert not ots.not_stored, ots.not_stored
+        for m in ots.stored:
+            links = m.findall("detail/link")
+            assert [l.get("uid") for l in links] == ["isrkit-acoustic-detector-isr-pi"]
+            assert m.find("detail/takv") is None and m.find("detail/contact").get("endpoint") is None
+    finally:
+        c.stop()
+
+
+def test_fake_storability_rules():
+    eud = {"isrkit-acoustic-detector-isr-pi"}
+
+    def ev(xml):
+        return ET.fromstring(xml)
+
+    ok = cot.detection_event("MIC1", 52.0, -1.0, 0, 0.8, 300, parent_uid="isrkit-acoustic-detector-isr-pi")
+    assert storable(ev(ok), eud) is None
+    assert storable(ev(cot.sensor_event("MIC1", 52.0, -1.0, 0, "listening")), eud) is None
+    assert storable(ev(cot.detection_event("MIC1", 0, 0, 0, 0.8, 300)), eud) == "no position"
+    assert "non-EUD" in storable(ev(cot.detection_event("MIC1", 52.0, -1.0, 0, 0.8, 300,
+                                                         parent_uid="ACOUSTIC-MIC1")), eud)
+    assert storable(ev(registration_event("isrkit-acoustic-detector-isr-pi", "ACOUSTIC isr-pi",
+                                          52.0, -1.0)), eud) == "has takv"
+    loc = cot.build_event("x", "b-m-p-s-p-loc", 52.0, -1.0, 0, "x", "", 60)
+    assert storable(ev(loc), eud).startswith("type")
+    assert storable(ev(cot.build_event("x", "b-m-p-w", 52.0, -1.0, 0, "x", "", 60)), eud) is None
