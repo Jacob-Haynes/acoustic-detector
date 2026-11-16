@@ -173,10 +173,18 @@ class StreamResampler:
         return out.astype(np.float32)
 
 
-def pick_usb_input(devices) -> int | None:
-    """Prefer the first USB capture device (the Pi 5 has no built-in mic); then the first real
-    ALSA card ("... (hw:2,0)"), since some USB mics don't say USB in their name; else default."""
+DEFAULT_PREFER = ("Yeti Nano",)
+
+
+def pick_usb_input(devices, prefer=DEFAULT_PREFER) -> int | None:
+    """Auto-select an input: first a preferred mic by name (AUDIO_PREFER, default "Yeti Nano"),
+    then the first USB capture device (the Pi 5 has no built-in mic), then the first real ALSA
+    card ("... (hw:2,0)"), since some USB mics don't say USB in their name; else system default."""
     inputs = [(i, str(d.get("name", ""))) for i, d in enumerate(devices) if d.get("max_input_channels", 0) > 0]
+    for want in prefer or ():
+        for idx, name in inputs:
+            if want.strip() and want.strip().lower() in name.lower():
+                return idx
     for idx, name in inputs:
         if "usb" in name.lower():
             return idx
@@ -218,10 +226,12 @@ class MicSource:
 
     kind = "mic"
 
-    def __init__(self, device: str | int | None = None):
+    def __init__(self, device: str | int | None = None, prefer=DEFAULT_PREFER, rate: int | None = None):
         import sounddevice as sd
 
         self.sd = sd
+        self.prefer = tuple(prefer or ())
+        self.forced_rate = rate
         self.error: str | None = None
         self.overflows = 0
         self._reopen = threading.Event()
@@ -229,19 +239,36 @@ class MicSource:
         self._configure(self.requested)
 
     def _configure(self, device):
+        """Pick the device and a (rate, channels) it accepts. ALSA hw: devices don't convert,
+        so e.g. a Yeti Nano on the Pi only opens at 48 kHz stereo; we downmix and resample."""
         sd = self.sd
         if device is None:
-            device = pick_usb_input(sd.query_devices())
+            device = pick_usb_input(sd.query_devices(), self.prefer)
         info = sd.query_devices(device, "input")
+        native = int(info["default_samplerate"])
+        max_ch = max(1, int(info.get("max_input_channels", 1)))
+        rates = [self.forced_rate] if self.forced_rate else [SAMPLE_RATE, native, 48000, 44100]
+        chans = [1] + ([2] if max_ch >= 2 else []) + ([max_ch] if max_ch > 2 else [])
+        chosen, last_err = None, None
+        for r in dict.fromkeys(rates):
+            for c in chans:
+                try:
+                    sd.check_input_settings(device=device, samplerate=r, channels=c, dtype="float32")
+                    chosen = (int(r), c)
+                    break
+                except Exception as e:  # noqa: BLE001
+                    last_err = e
+            if chosen:
+                break
+        if chosen is None:
+            raise RuntimeError(f"{info['name']}: no usable rate/channel setting ({last_err})")
         self.device = device
         self.device_name = info["name"]
-        self.native_rate = int(info["default_samplerate"])
-        self.rate = SAMPLE_RATE
-        try:
-            sd.check_input_settings(device=device, samplerate=SAMPLE_RATE, channels=1, dtype="float32")
-        except Exception:  # noqa: BLE001
-            self.rate = self.native_rate
-        self.description = f"{self.device_name} @ {self.rate} Hz"
+        self.native_rate = native
+        self.rate, self.channels = chosen
+        conv = "" if self.rate == SAMPLE_RATE else f" -> resampled to {SAMPLE_RATE}"
+        mix = "" if self.channels == 1 else f", {self.channels}ch downmixed"
+        self.description = f"{self.device_name} @ {self.rate} Hz{mix}{conv}"
 
     def switch(self, device) -> str:
         """Change input device (index or name). Raises if the device can't be used."""
@@ -261,16 +288,16 @@ class MicSource:
                 if status:
                     self.overflows += 1
                 try:
-                    q.put_nowait(indata[:, 0].copy())
+                    q.put_nowait(indata.mean(axis=1) if indata.shape[1] > 1 else indata[:, 0].copy())
                 except queue.Full:
                     self.overflows += 1
 
-            rate, device = self.rate, self.device
+            rate, device, channels = self.rate, self.device, self.channels
             blocksize = int(rate * BLOCK / SAMPLE_RATE)
             resampler = StreamResampler(rate) if rate != SAMPLE_RATE else None
             self._reopen.clear()
             try:
-                with self.sd.InputStream(device=device, channels=1, samplerate=rate,
+                with self.sd.InputStream(device=device, channels=channels, samplerate=rate,
                                          dtype="float32", blocksize=blocksize, callback=callback):
                     logger.info("Microphone open: %s", self.description)
                     self.error = None

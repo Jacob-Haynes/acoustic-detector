@@ -50,12 +50,45 @@ with backoff.
 ## Hardware
 
 - Raspberry Pi 5 (64-bit Pi OS Bookworm), SSD boot.
-- **A USB microphone.** The Pi 5 has no built-in mic. Any class-compliant USB mic or USB sound
-  card works. An omnidirectional lavalier on a cheap USB dongle is fine. A foam or fur windshield
-  makes a big difference outdoors.
+- **A USB microphone.** The Pi 5 has no built-in mic. The recommended mic is the **Blue Yeti
+  Nano** (see below). Any class-compliant USB mic or USB sound card also works. A foam or fur
+  windshield makes a big difference outdoors.
 - Optional: the BFT kit (OpenTAKServer + Heltec V3 Meshtastic node via `mesh-bridge`) for ATAK
   markers and mesh texts.
 - Test target: a 5" FPV quad.
+
+### Recommended mic: Blue Yeti Nano
+
+This is the demo mic. It's a class-compliant USB condenser (48 kHz / 24-bit, 20 Hz–20 kHz) and
+needs no drivers on Pi OS or macOS.
+
+- **Auto-selected.** With no `AUDIO_DEVICE` set, the sensor picks any input whose name contains
+  "Yeti Nano" ahead of other inputs: the Mac's built-in mic and webcams, or other USB audio. The
+  preference list is `AUDIO_PREFER` (comma-separated name fragments, default `Yeti Nano`).
+- **48 kHz is handled.** On the Pi, ALSA `hw:` devices don't convert formats, so the Nano opens at
+  its native 48 kHz (stereo if mono is refused). It's downmixed and resampled to 16 kHz for YAMNet
+  with a continuous anti-alias filter. The UI's Microphone line shows what was negotiated, e.g.
+  `Yeti Nano: USB Audio (hw:2,0) @ 48000 Hz, 2ch downmixed -> resampled to 16000`. On macOS,
+  CoreAudio delivers 16 kHz directly. `AUDIO_RATE=48000` forces the native rate if you want it.
+- **Pattern.** It has two capsules and two patterns: **cardioid** (picks up from the front) and
+  **omni**. For the office demo use **cardioid**, with the front of the mic facing the speaker
+  playing drone audio. This rejects some room noise from behind. At a field OP, where the drone
+  could come from anywhere, **omni** is the better choice. The pattern is switched in Logitech G
+  HUB / Blue Sherpa on a Mac or PC. Whether it stays set once the mic is moved to the Pi isn't
+  verified here, so check the setting before the demo.
+- **Gain.** Reviews disagree on whether the Nano has a hardware gain knob (the front dial is
+  headphone volume and mute). Set the level in software instead: on the Pi with `alsamixer -c <card>`
+  → F4 → *Mic* capture at about mid (50–70%), on a Mac in G HUB / Sherpa. Aim for the UI's
+  **Input peak** at ~0.05–0.3 with normal speech at 1 m and never red. Make sure the **mute** light
+  isn't on: tap the front dial to toggle mute.
+- **Power.** Logitech's spec sheet gives **5 V / 150 mA** from USB bus power. That's well within
+  the Pi 5's 600 mA USB limit, which applies when the Pi isn't on a 5 A PSU, so no powered hub is
+  needed for the mic alone.
+- **Tested here:** I ran 30 s of a real office on a Mac through `scripts/run-laptop.sh` with the
+  Nano auto-selected. The noise floor (10th percentile level) was **−45 dBFS** with a median of
+  −43 dBFS, and the loudest window was −27 dBFS. YAMNet heard *Inside, small room*, *Typing*,
+  *Speech* and *Music*. Confidence peaked at **0.02** (the threshold is 0.65), and no events were
+  logged. The forced 48 kHz resample path also ran live on the Nano without overflows.
 
 ## Install (Pi)
 
@@ -102,7 +135,8 @@ Any class-compliant USB mic or USB sound card works. No drivers are needed.
 3. Set the capture gain: `alsamixer -c 2`, press **F4** (Capture), and raise the mic level to
    about 70–80%. If the device has **Auto Gain Control**, turn it **off** (select it and press `M`).
    AGC pumps the background up whenever it's quiet, which inflates the noise floor.
-4. Pick the device. By default the first USB capture device is used. To change it, use the
+4. Pick the device. By default a Yeti Nano is used if present, otherwise the first USB capture
+   device. To change it, use the
    **Microphone** panel in the web UI (choose it, then press **Use**; the choice is saved in
    `/var/lib/acoustic-detector/audio_device.txt` and survives restarts), or set
    `AUDIO_DEVICE=<index or part of the name>` in the env file. To list the devices:

@@ -93,6 +93,8 @@ class Settings:
     gemini_min_interval_s: float = 30.0
 
     audio_device: str | None = None
+    audio_prefer: tuple = ("Yeti Nano",)  # auto-select these mics first (name substring)
+    audio_rate: int | None = None         # force a capture rate (default: 16 kHz if allowed, else native)
     web_port: int = 8100
     public_url: str | None = None       # URL advertised in the heartbeat (default: auto)
     data_dir: Path = field(default_factory=_default_data_dir)
@@ -130,6 +132,11 @@ class Settings:
         s.gemini_model = _env("GEMINI_MODEL", s.gemini_model)
         s.gemini_auto = _env_bool("GEMINI_AUTO", s.gemini_auto)
         s.audio_device = _env("AUDIO_DEVICE", None)
+        prefer = _env("AUDIO_PREFER")
+        if prefer is not None:
+            s.audio_prefer = tuple(p.strip() for p in prefer.split(",") if p.strip())
+        rate = _env_int("AUDIO_RATE", 0)
+        s.audio_rate = rate or None
         s.web_port = _env_int("WEB_PORT", s.web_port)
         s.public_url = _env("PUBLIC_URL", None)
         if _env("DATA_DIR"):

@@ -90,13 +90,13 @@ def main(argv=None):
         source = FileSource(args.file, loop=args.loop)
     else:
         try:
-            source = MicSource(s.audio_device)
+            source = MicSource(s.audio_device, prefer=s.audio_prefer, rate=s.audio_rate)
         except Exception as e:  # noqa: BLE001
             if s.audio_device and not args.device:
                 log.warning("Saved/configured device %r unusable (%s); falling back to auto-select",
                             s.audio_device, e)
                 try:
-                    source = MicSource(None)
+                    source = MicSource(None, prefer=s.audio_prefer, rate=s.audio_rate)
                 except Exception as e2:  # noqa: BLE001
                     log.error("No usable microphone (%s). Use --simulate or --file.", e2)
                     return 2
