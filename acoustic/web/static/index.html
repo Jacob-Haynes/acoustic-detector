@@ -1,0 +1,378 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Acoustic Detector</title>
+<style>
+  :root {
+    --bg: #0d1117; --panel: #161b22; --line: #30363d; --text: #e6edf3; --muted: #8b949e;
+    --ok: #3fb950; --warn: #d29922; --bad: #f85149; --accent: #58a6ff; --cloud: #a371f7;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 14px/1.4 system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
+  header { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px;
+           padding: 10px 16px; border-bottom: 1px solid var(--line); }
+  header h1 { font-size: 16px; margin: 0; letter-spacing: .04em; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chip { border: 1px solid var(--line); border-radius: 999px; padding: 2px 10px; font-size: 12px;
+          color: var(--muted); white-space: nowrap; }
+  .chip b { color: var(--text); font-weight: 600; }
+  .chip.ok { border-color: var(--ok); } .chip.ok b { color: var(--ok); }
+  .chip.off { border-color: var(--line); }
+  .chip.bad { border-color: var(--bad); } .chip.bad b { color: var(--bad); }
+  .chip.cloud { border-color: var(--cloud); } .chip.cloud b { color: var(--cloud); }
+  main { display: grid; grid-template-columns: 340px 1fr; gap: 12px; padding: 12px 16px; }
+  @media (max-width: 900px) { main { grid-template-columns: 1fr; } }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px; }
+  .panel h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted);
+              margin: 0 0 8px; }
+  #banner { text-align: center; padding: 16px 8px; border-radius: 6px; font-size: 22px; font-weight: 700;
+            letter-spacing: .06em; background: #0f2a17; color: var(--ok); transition: background .2s; }
+  #banner.active { background: #3d0f0f; color: #ffb4ae; animation: pulse 1s infinite alternate; }
+  @keyframes pulse { from { box-shadow: 0 0 0 0 rgba(248,81,73,.6);} to { box-shadow: 0 0 18px 2px rgba(248,81,73,.6);} }
+  .meter { position: relative; height: 26px; background: #0b0f14; border: 1px solid var(--line);
+           border-radius: 4px; margin: 12px 0 4px; overflow: hidden; }
+  .meter .fill { position: absolute; inset: 0 auto 0 0; width: 0; background: var(--accent); transition: width .25s; }
+  .meter .tick { position: absolute; top: 0; bottom: 0; width: 2px; }
+  .meter .tick.on { background: var(--bad); } .meter .tick.off { background: var(--warn); }
+  .meter .val { position: absolute; right: 8px; top: 3px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .legend { font-size: 11px; color: var(--muted); display: flex; justify-content: space-between; }
+  .comp { display: grid; grid-template-columns: 118px 1fr 70px; align-items: center; gap: 8px; margin: 6px 0; font-size: 13px; }
+  .comp .bar { height: 8px; background: #0b0f14; border-radius: 4px; overflow: hidden; }
+  .comp .bar div { height: 100%; width: 0; background: var(--accent); transition: width .25s; }
+  .comp.na { color: var(--muted); } .comp.na .bar div { background: transparent; }
+  .comp.neg .bar div { background: var(--warn); }
+  .num { font-variant-numeric: tabular-nums; text-align: right; }
+  .kv { display: grid; grid-template-columns: auto 1fr; gap: 2px 10px; font-size: 13px; }
+  .kv span:nth-child(odd) { color: var(--muted); }
+  canvas { display: block; width: 100%; background: #000; border-radius: 4px; }
+  #wfwrap { position: relative; }
+  #faxis { position: absolute; left: 4px; top: 0; bottom: 0; pointer-events: none; font-size: 10px; color: #cfd8e3; }
+  #faxis div { position: absolute; transform: translateY(-50%); text-shadow: 0 0 3px #000; }
+  .btns { display: flex; flex-wrap: wrap; gap: 6px; }
+  button { background: #21262d; color: var(--text); border: 1px solid var(--line); border-radius: 6px;
+           padding: 7px 10px; font: inherit; cursor: pointer; }
+  button:hover:not(:disabled) { border-color: var(--accent); }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  button.primary { background: #1f3a5f; border-color: #2f5f9a; }
+  button.cloud { border-color: var(--cloud); }
+  .progress { height: 4px; background: #0b0f14; border-radius: 2px; margin-top: 8px; overflow: hidden; }
+  .progress div { height: 100%; width: 0; background: var(--bad); }
+  .small { font-size: 12px; color: var(--muted); }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 4px 6px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+  th { color: var(--muted); font-weight: 500; font-size: 12px; }
+  td.wrap { white-space: normal; }
+  .k-detect { color: var(--bad); font-weight: 700; } .k-clear { color: var(--ok); }
+  .k-suppressed { color: var(--warn); } .k-gemini { color: var(--cloud); } .k-enrolled, .k-test { color: var(--accent); }
+  #gemini { border-color: #3b2a5c; }
+  #gemini .verdict { font-size: 18px; font-weight: 700; margin: 4px 0; }
+  .stack { display: grid; gap: 12px; align-content: start; }
+  .truth { color: var(--warn); }
+</style>
+</head>
+<body>
+<header>
+  <h1>ACOUSTIC DETECTOR <span id="sensor" style="color:var(--muted)"></span></h1>
+  <div class="chips">
+    <span class="chip" id="c-source">Input <b>…</b></span>
+    <span class="chip" id="c-model">On-device <b>…</b></span>
+    <span class="chip" id="c-cal">Calibration <b>…</b></span>
+    <span class="chip" id="c-gemini">Gemini <b>…</b></span>
+    <span class="chip" id="c-tak">ATAK <b>…</b></span>
+    <span class="chip" id="c-mesh">Mesh <b>…</b></span>
+    <span class="chip" id="c-ws">UI <b>connecting</b></span>
+  </div>
+</header>
+
+<main>
+  <div class="stack">
+    <section class="panel">
+      <div id="banner">LISTENING</div>
+      <div class="meter" id="meter">
+        <div class="fill" id="fill"></div>
+        <div class="tick off" id="tick-off" title="clear threshold"></div>
+        <div class="tick on" id="tick-on" title="detect threshold"></div>
+        <div class="val" id="confval">0.00</div>
+      </div>
+      <div class="legend"><span>confidence (smoothed)</span><span><span style="color:var(--warn)">▮</span> clear &nbsp;<span style="color:var(--bad)">▮</span> detect</span></div>
+      <div style="margin-top:10px">
+        <div class="comp" id="cp-spectral"><span>Prop comb</span><div class="bar"><div></div></div><span class="num">–</span></div>
+        <div class="comp" id="cp-yamnet"><span>YAMNet drone</span><div class="bar"><div></div></div><span class="num">–</span></div>
+        <div class="comp neg" id="cp-confuser"><span>YAMNet confuser</span><div class="bar"><div></div></div><span class="num">–</span></div>
+        <div class="comp" id="cp-calibration"><span>My drone</span><div class="bar"><div></div></div><span class="num">–</span></div>
+      </div>
+      <div class="kv" style="margin-top:8px">
+        <span>Prop tone</span><span id="f0">–</span>
+        <span>Level</span><span id="level">–</span>
+        <span>YAMNet top</span><span id="top">–</span>
+        <span id="truthk" hidden>Sim truth</span><span id="truth" class="truth" hidden>–</span>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Teach it your drone</h2>
+      <div class="btns">
+        <button class="primary" id="rec-drone">● Record drone (5 s)</button>
+        <button id="rec-bg">● Record background (5 s)</button>
+        <button id="cal-clear">Clear</button>
+      </div>
+      <div class="progress"><div id="recprog"></div></div>
+      <p class="small" id="calinfo">Hover or fly the drone 5–30 m from the mic, then press Record drone. Do 3–5 clips at different throttle and distance, plus 1–2 background clips with the drone off.</p>
+    </section>
+
+    <section class="panel" id="gemini">
+      <h2>Cloud second opinion (Gemini)</h2>
+      <div id="gem-mode" class="small">…</div>
+      <div class="verdict" id="gem-verdict"></div>
+      <div class="small" id="gem-detail"></div>
+      <div class="btns" style="margin-top:8px">
+        <button class="cloud" id="gem-ask" disabled>Ask Gemini about last 4 s</button>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Outputs</h2>
+      <div class="kv" id="outputs"></div>
+      <div class="btns" style="margin-top:8px"><button id="test">Send test alert</button></div>
+      <div class="small" id="testres"></div>
+    </section>
+  </div>
+
+  <div class="stack">
+    <section class="panel">
+      <h2>Live waterfall (50 Hz – 8 kHz, log scale)</h2>
+      <div id="wfwrap">
+        <canvas id="wf" style="height:300px"></canvas>
+        <div id="faxis"></div>
+      </div>
+      <canvas id="hist" style="height:70px;margin-top:8px"></canvas>
+      <div class="small">confidence, last 60 s</div>
+    </section>
+    <section class="panel">
+      <h2>Detection log</h2>
+      <table>
+        <thead><tr><th>Time</th><th>Event</th><th>Conf</th><th>Detail</th></tr></thead>
+        <tbody id="log"></tbody>
+      </table>
+    </section>
+  </div>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+let meta = { bins: 128, fmin: 50, fmax: 8000 };
+let thresholds = { on: 0.65, off: 0.4 };
+
+// ---------- waterfall ----------
+const wf = $("wf"), wctx = wf.getContext("2d");
+let palette = [];
+function buildPalette() {
+  // dark blue -> cyan -> yellow -> red -> white
+  const stops = [[0,[0,0,8]],[0.25,[10,40,120]],[0.5,[0,170,200]],[0.7,[240,220,40]],[0.88,[240,60,30]],[1,[255,255,255]]];
+  for (let i = 0; i < 256; i++) {
+    const t = i / 255; let a = stops[0], b = stops[stops.length-1];
+    for (let s = 0; s < stops.length - 1; s++) if (t >= stops[s][0] && t <= stops[s+1][0]) { a = stops[s]; b = stops[s+1]; break; }
+    const u = (t - a[0]) / Math.max(1e-6, b[0] - a[0]);
+    palette.push(a[1].map((c, k) => Math.round(c + (b[1][k] - c) * u)));
+  }
+}
+buildPalette();
+function sizeCanvas(c) {
+  const w = Math.floor(c.clientWidth * devicePixelRatio), h = Math.floor(c.clientHeight * devicePixelRatio);
+  if (c.width !== w || c.height !== h) { c.width = w; c.height = h; }
+}
+function drawAxis() {
+  const ax = $("faxis"); ax.innerHTML = "";
+  [100, 200, 500, 1000, 2000, 4000].forEach(f => {
+    const frac = Math.log(f / meta.fmin) / Math.log(meta.fmax / meta.fmin);
+    const d = document.createElement("div"); d.style.top = (100 - frac * 100) + "%";
+    d.textContent = f >= 1000 ? (f / 1000) + "k" : f; ax.appendChild(d);
+  });
+}
+function pushColumns(cols) {
+  if (!cols || !cols.length) return;
+  sizeCanvas(wf);
+  const W = wf.width, H = wf.height, n = cols.length;
+  const step = Math.max(1, Math.round(devicePixelRatio));
+  const shift = n * step;
+  wctx.drawImage(wf, shift, 0, W - shift, H, 0, 0, W - shift, H);
+  const img = wctx.createImageData(shift, H);
+  cols.forEach((b64, ci) => {
+    const raw = atob(b64), bins = raw.length;
+    for (let y = 0; y < H; y++) {
+      const bin = Math.min(bins - 1, Math.floor((H - 1 - y) / H * bins));
+      const p = palette[raw.charCodeAt(bin)];
+      for (let s = 0; s < step; s++) {
+        const o = (y * shift + ci * step + s) * 4;
+        img.data[o] = p[0]; img.data[o+1] = p[1]; img.data[o+2] = p[2]; img.data[o+3] = 255;
+      }
+    }
+  });
+  wctx.putImageData(img, W - shift, 0);
+}
+
+// ---------- history sparkline ----------
+const hist = $("hist"), hctx = hist.getContext("2d");
+function drawHistory(h) {
+  sizeCanvas(hist);
+  const W = hist.width, H = hist.height;
+  hctx.fillStyle = "#000"; hctx.fillRect(0, 0, W, H);
+  [["#d29922", thresholds.off], ["#f85149", thresholds.on]].forEach(([c, v]) => {
+    hctx.strokeStyle = c; hctx.setLineDash([4, 4]); hctx.beginPath();
+    hctx.moveTo(0, H - v * H); hctx.lineTo(W, H - v * H); hctx.stroke();
+  });
+  hctx.setLineDash([]);
+  if (!h || h.length < 2) return;
+  hctx.strokeStyle = "#58a6ff"; hctx.lineWidth = 2 * devicePixelRatio; hctx.beginPath();
+  h.forEach((v, i) => { const x = W - (h.length - 1 - i) * (W / 119); const y = H - v * H; i ? hctx.lineTo(x, y) : hctx.moveTo(x, y); });
+  hctx.stroke(); hctx.lineWidth = 1;
+}
+
+// ---------- state rendering ----------
+function chip(id, label, value, cls) { const el = $(id); el.className = "chip " + (cls || ""); el.innerHTML = label + " <b>" + value + "</b>"; }
+function comp(id, v, na) {
+  const el = $(id);
+  el.classList.toggle("na", v === null || v === undefined);
+  el.querySelector(".bar div").style.width = ((v || 0) * 100) + "%";
+  el.querySelector(".num").textContent = (v === null || v === undefined) ? (na || "off") : v.toFixed(2);
+}
+function fmtTime(ts) { return new Date(ts * 1000).toLocaleTimeString(); }
+function esc(s) { return String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c])); }
+
+function renderState(st) {
+  if (!st) return;
+  const c = st.confidence || 0;
+  $("fill").style.width = (c * 100) + "%";
+  $("fill").style.background = st.active ? "var(--bad)" : (c >= thresholds.off ? "var(--warn)" : "var(--accent)");
+  $("confval").textContent = c.toFixed(2);
+  const b = $("banner"); b.classList.toggle("active", !!st.active);
+  b.textContent = st.active ? "DRONE DETECTED" : "LISTENING";
+  const cp = st.components || {};
+  comp("cp-spectral", cp.spectral);
+  comp("cp-yamnet", cp.yamnet, "not loaded");
+  comp("cp-confuser", cp.confuser, "not loaded");
+  comp("cp-calibration", cp.calibration, "not enrolled");
+  const sp = st.spectral || {};
+  $("f0").textContent = sp.f0_hz ? `${Math.round(sp.f0_hz)} Hz (${sp.n_harmonics} harmonics)` : "none";
+  $("level").textContent = sp.level_dbfs !== undefined ? sp.level_dbfs.toFixed(0) + " dBFS" : "–";
+  $("top").textContent = st.yamnet ? st.yamnet.top.map(([n, s]) => `${n} ${s.toFixed(2)}`).join(", ") : "–";
+  const hasTruth = !!st.sim_truth;
+  $("truthk").hidden = !hasTruth; $("truth").hidden = !hasTruth;
+  if (hasTruth) $("truth").textContent = st.sim_truth;
+}
+
+function renderStatus(s) {
+  if (!s) return;
+  thresholds = { on: s.detector.on, off: s.detector.off };
+  $("tick-on").style.left = (thresholds.on * 100) + "%";
+  $("tick-off").style.left = (thresholds.off * 100) + "%";
+  $("sensor").textContent = "· " + s.sensor.name;
+  const src = s.source;
+  chip("c-source", "Input", src.kind === "simulate" ? "SIMULATED" : src.kind === "file" ? "FILE" + (src.finished ? " (ended)" : "") : "MIC",
+       src.kind === "mic" ? "ok" : "");
+  $("c-source").title = src.description;
+  chip("c-model", "On-device", s.detector.yamnet ? "YAMNet + spectral" : "spectral only", s.detector.yamnet ? "ok" : "");
+  $("c-model").title = s.detector.yamnet_reason || "YAMNet (AudioSet) on CPU via LiteRT";
+  const cal = s.calibration;
+  chip("c-cal", "Calibration", cal.enrolled ? `${cal.counts.drone} drone / ${cal.counts.background} bg` : "none", cal.enrolled ? "ok" : "");
+  const g = s.gemini;
+  chip("c-gemini", "Gemini", g.enabled ? "CLOUD · " + g.model : "OFFLINE", g.enabled ? "cloud" : "off");
+  const o = s.outputs;
+  chip("c-tak", "ATAK", !o.tak ? "disabled" : !s.sensor.has_position ? "no position" : o.tak.connected ? "connected" : "down",
+       !o.tak ? "" : (o.tak.connected && s.sensor.has_position) ? "ok" : "bad");
+  chip("c-mesh", "Mesh", !o.mesh ? "disabled" : o.mesh.connected ? "connected" : "broker down", !o.mesh ? "" : o.mesh.connected ? "ok" : "bad");
+
+  $("outputs").innerHTML = [
+    ["Sensor", `${esc(s.sensor.name)} ${s.sensor.has_position ? s.sensor.lat.toFixed(5) + ", " + s.sensor.lon.toFixed(5) : "(no SENSOR_LAT/LON)"}`],
+    ["ATAK", o.tak ? `${esc(o.tak.host)} · ${o.tak.connected ? "up" : "down"} · ${o.tak.sent} sent` : "disabled"],
+    ["Mesh", o.mesh ? `${esc(o.mesh.host)} · ${o.mesh.connected ? "up" : "down"} · ${o.mesh.sent} sent` : "disabled"],
+    ["Cooldown", s.detector.cooldown_s + " s between alerts"],
+  ].map(([k, v]) => `<span>${k}</span><span>${v}</span>`).join("");
+
+  // recording
+  const rec = s.recording;
+  $("recprog").style.width = rec ? (rec.progress * 100) + "%" : "0";
+  ["rec-drone", "rec-bg"].forEach(id => $(id).disabled = !!rec);
+  if (rec) $("calinfo").textContent = `Recording ${rec.label}… keep it steady.`;
+  else if (s.last_record && Date.now() / 1000 - s.last_record.ts < 20)
+    $("calinfo").textContent = !s.last_record.ok ? `Save failed: ${s.last_record.error}`
+      : s.last_record.warning ? `Saved ${s.last_record.file}. ⚠ ${s.last_record.warning}` : `Saved ${s.last_record.file}. Profile rebuilt.`;
+
+  // gemini
+  $("gem-ask").disabled = !g.enabled || g.busy;
+  $("gem-mode").innerHTML = g.enabled
+    ? `<b style="color:var(--cloud)">CLOUD MODE</b>: clips are uploaded to Google (${esc(g.model)}). Use demo audio only.`
+    : `OFFLINE: ${esc(g.reason)}. All detection runs on this Pi.`;
+  const last = g.last;
+  if (g.busy) { $("gem-verdict").textContent = "asking…"; }
+  else if (last) {
+    if (!last.ok) { $("gem-verdict").textContent = "error"; $("gem-detail").textContent = last.error; }
+    else {
+      const v = last.drone_audible === true ? "DRONE" : last.drone_audible === false ? "NO DRONE" : "UNSURE";
+      $("gem-verdict").textContent = `${v}${last.confidence != null ? " · " + last.confidence.toFixed(2) : ""}`;
+      $("gem-verdict").style.color = last.drone_audible ? "var(--bad)" : "var(--ok)";
+      $("gem-detail").textContent = `${last.best_guess} · ${last.reason} (${last.trigger}, ${fmtTime(last.ts)}, ${last.latency_s}s)`;
+    }
+  }
+}
+
+function renderLog(log) {
+  if (!log) return;
+  $("log").innerHTML = log.map(e => {
+    let detail = "";
+    if (e.kind === "detect" || e.kind === "suppressed" || e.kind === "clear") {
+      const c = e.components || {};
+      detail = `f0 ${e.f0_hz || "–"} Hz · comb ${c.spectral ?? "–"} · yam ${c.yamnet ?? "off"} · cal ${c.calibration ?? "off"}`;
+      if (e.yamnet_top) detail += ` · "${esc(e.yamnet_top)}"`;
+      if (e.kind === "clear" && e.peak !== undefined) detail = `peak ${e.peak}`;
+      if (e.kind === "suppressed") detail = "within cooldown, no alert · " + detail;
+      if (e.sim_truth) detail += ` · truth: ${esc(e.sim_truth)}`;
+    } else if (e.kind === "gemini") {
+      detail = e.ok ? `${e.drone_audible ? "drone" : "no drone"} · ${esc(e.best_guess)} (${e.trigger})` : "request failed";
+    } else if (e.kind === "enrolled") {
+      detail = `${e.label}: ${esc(e.file)}`;
+    } else if (e.kind === "test") { detail = "test alert sent"; }
+    return `<tr><td>${fmtTime(e.ts)}</td><td class="k-${e.kind}">${e.kind}</td><td>${e.kind === "enrolled" || e.kind === "test" ? "" : (e.confidence ?? 0).toFixed(2)}</td><td class="wrap">${detail}</td></tr>`;
+  }).join("") || `<tr><td colspan="4" class="small">No events yet.</td></tr>`;
+}
+
+// ---------- actions ----------
+async function post(url, body) {
+  const r = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body || {}) });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.detail || r.statusText);
+  return j;
+}
+$("rec-drone").onclick = () => post("/api/record", { label: "drone", seconds: 5 }).catch(e => alert(e.message));
+$("rec-bg").onclick = () => post("/api/record", { label: "background", seconds: 5 }).catch(e => alert(e.message));
+$("cal-clear").onclick = () => { if (confirm("Delete all enrolled clips?")) post("/api/calibration/clear").catch(e => alert(e.message)); };
+$("gem-ask").onclick = () => post("/api/gemini").catch(e => alert(e.message));
+$("test").onclick = () => post("/api/test-alert").then(r => {
+  $("testres").textContent = `mesh ${r.mesh_sent ? "sent" : "NOT sent (broker down?)"} · ATAK ${r.cot_queued ? "queued" : "not sent (no position)"}`;
+}).catch(e => alert(e.message));
+
+// ---------- websocket ----------
+function connect() {
+  const ws = new WebSocket((location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/ws");
+  ws.onopen = () => chip("c-ws", "UI", "live", "ok");
+  ws.onclose = () => { chip("c-ws", "UI", "reconnecting", "bad"); setTimeout(connect, 1500); };
+  ws.onmessage = (m) => {
+    const d = JSON.parse(m.data);
+    pushColumns(d.wf);
+    if (d.state) renderState(d.state);
+    if (d.status) renderStatus(d.status);
+    if (d.history) drawHistory(d.history);
+    if (d.log) renderLog(d.log);
+  };
+}
+fetch("/api/status").then(r => r.json()).then(s => {
+  meta = s.waterfall; drawAxis(); renderStatus(s); renderState(s.state);
+}).catch(() => {});
+fetch("/api/log").then(r => r.json()).then(renderLog).catch(() => {});
+drawAxis(); connect();
+</script>
+</body>
+</html>

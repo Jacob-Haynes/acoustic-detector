@@ -1,0 +1,8 @@
+fastapi>=0.110
+uvicorn[standard]>=0.29
+numpy>=1.24
+scipy>=1.10
+sounddevice>=0.4.6
+soundfile>=0.12
+paho-mqtt>=2.0
+google-genai>=1.0

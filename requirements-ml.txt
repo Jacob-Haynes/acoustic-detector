@@ -1,0 +1,3 @@
+# On-device classifier runtime. Installed separately so a missing wheel never blocks the install;
+# without it the detector runs on spectral features (+ calibration) only.
+ai-edge-litert>=1.2
