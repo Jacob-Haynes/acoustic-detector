@@ -6,3 +6,5 @@ sounddevice>=0.4.6
 soundfile>=0.12
 paho-mqtt>=2.0
 google-genai>=1.0
+av>=12           # audio track of MP4/MOV footage (bundles ffmpeg libs)
+python-multipart>=0.0.9

@@ -14,7 +14,7 @@ Every 0.5 s the last ~1 s of audio (16 kHz mono) goes through three independent 
 
 | Component | What it is | Needs |
 |---|---|---|
-| **Prop comb** | Hand-built spectral check. A multirotor makes a harmonic comb whose fundamental (rotation rate x blades) sits around 150–700 Hz for a 5" FPV quad. It's matched per 128 ms frame, so throttle changes don't smear it. Petrol engines also make combs, but at 20–60 Hz, so they score low. | nothing |
+| **Prop comb** | Hand-built spectral check. A multirotor makes a harmonic comb whose fundamental (rotation rate x blades) sits around 150–700 Hz for a 5" FPV quad. It's matched per 128 ms frame, so throttle changes don't smear it. Petrol engines also make combs, but at 20–60 Hz, so they score low. Voices are combs too, but they stop and start between syllables and their pitch wanders, so the score is damped unless the tone is **continuous** and **steady**. | nothing |
 | **YAMNet** | Google's pretrained AudioSet classifier (521 classes), run with LiteRT. AudioSet has **no "drone" class**, so the drone score counts `Aircraft`, `Aircraft engine`, `Propeller, airscrew`, `Helicopter`, `Fixed-wing aircraft, airplane`, `Light engine (high frequency)`, `Buzz`, `Insect`, `Bee, wasp, etc.`, `Mosquito`, `Fly, housefly` and `Whir` (insect classes weighted lower). A separate **confuser** score counts `Lawn mower`, `Chainsaw`, `Power tool`, `Motorcycle`, vehicle and engine classes, `Hair dryer`, `Vacuum cleaner` and `Speech`. | `models/yamnet.tflite` + `ai-edge-litert` |
 | **My drone** (calibration) | Cosine similarity to reference embeddings built from clips of *your* drone (64-band spectral shape, plus the YAMNet score vector when the model is loaded). If you also enrol background clips, the score becomes "closer to my drone than to this field". | 3–5 recorded clips |
 
@@ -23,7 +23,7 @@ score, or the average of prop comb and calibration once a drone is enrolled. YAM
 but can't trigger an alert on its own, and a confident "lawn mower" call pulls the score down.
 
 Alerting: the confidence is smoothed, then a **hysteresis** state machine raises a detection after
-2 windows ≥ 0.65 and clears after 6 windows < 0.40. Another detection within the **60 s cooldown**
+3 windows (1.5 s) ≥ 0.65 and clears after 6 windows < 0.40. Another detection within the **60 s cooldown**
 is logged as `suppressed` and sends no mesh text. All of these can be tuned in the env file.
 
 On a detection:
@@ -37,6 +37,12 @@ On a detection:
   the radio, and this tool never opens the serial port.
 - **Gemini** (if enabled): the last 4 s are sent for a second opinion, which is shown in its own panel.
 - Each event is appended to `/var/lib/acoustic-detector/detections.jsonl`.
+
+Every 10 s a retained heartbeat goes to `isrkit/heartbeat/acoustic-detector`
+(`{"tool","host","url","mode","status","ts"}`, where mode is `cpu`, `gemini`, `simulate` or
+`replay`, and status is `ok`, `degraded` or `error`). A clean exit leaves `stopped`. A crash
+leaves `error` through the MQTT last-will. The Pi launcher uses this to list the tool wherever
+it runs.
 
 If OpenTAKServer or the MQTT broker is down, the sensor logs it, keeps detecting, and reconnects
 with backoff.
@@ -74,11 +80,66 @@ journalctl -u acoustic-detector -f
 Web UI: `http://<pi-ip>:8100`.
 
 `ACOUSTIC_INPUT` in the env file selects the input: `auto` (USB mic if `arecord -l` finds one,
-otherwise simulate), `mic`, `simulate`, or the path to a clip to replay in a loop. To pick a
-specific device, list them with
-`/opt/acoustic-detector/.venv/bin/python -m acoustic --list-devices` and set `AUDIO_DEVICE`.
+otherwise simulate), `mic`, `simulate`, or the path to a clip (audio or MP4/MOV) to replay in a
+loop.
 
-## Run on a laptop (no hardware)
+## USB microphone setup (Pi OS)
+
+Any class-compliant USB mic or USB sound card works. No drivers are needed.
+
+1. Plug it in and check ALSA sees it:
+   ```bash
+   arecord -l            # e.g. "card 2: Device [USB PnP Sound Device], device 0: USB Audio"
+   ```
+2. Record 5 s and play it back (or copy it off and listen):
+   ```bash
+   arecord -D plughw:2,0 -f S16_LE -r 16000 -c 1 -d 5 /tmp/mic.wav
+   aplay /tmp/mic.wav    # needs an output device; otherwise scp it to a laptop
+   ```
+3. Set the capture gain: `alsamixer -c 2`, press **F4** (Capture), and raise the mic level to
+   about 70–80%. If the device has **Auto Gain Control**, turn it **off** (select it and press `M`).
+   AGC pumps the background up whenever it's quiet, which inflates the noise floor.
+4. Pick the device. By default the first USB capture device is used. To change it, use the
+   **Microphone** panel in the web UI (choose it, then press **Use**; the choice is saved in
+   `/var/lib/acoustic-detector/audio_device.txt` and survives restarts), or set
+   `AUDIO_DEVICE=<index or part of the name>` in the env file. To list the devices:
+   `sudo -u acoustic /opt/acoustic-detector/.venv/bin/python -m acoustic --list-devices`.
+5. Check the **Input peak** meter: speech at 1 m should reach about 0.05–0.3. Red means clipping:
+   turn the gain down. A flat meter means the wrong device or the gain is at zero.
+
+If the mic is unplugged, the sensor logs the error, shows it in the UI, reports `error` in its
+heartbeat, and retries every 3 s. It finds the mic again after a replug, even if the card number
+has changed.
+
+## Running on a laptop
+
+The Pi at the OP is the normal setup. A laptop is the fallback for when the USB mic misbehaves on
+the day. It uses the laptop's built-in mic and still reports to the Pi hub over the hotspot.
+
+1. Join the Pi's hotspot (the hub is `isr-pi.local`, 192.168.4.1).
+2. Set the environment (the platform's `laptop/start-mac.sh` does this from
+   `~/.config/isr-kit/station.env`):
+   `TAK_HOST=isr-pi.local MQTT_HOST=isr-pi.local MQTT_USER=isrkit MQTT_PASS=...`
+   plus `SENSOR_NAME`, `SENSOR_LAT` and `SENSOR_LON`.
+3. Run it:
+   ```bash
+   scripts/run-laptop.sh                   # macOS / Linux
+   ```
+   ```powershell
+   powershell -ExecutionPolicy Bypass -File scripts\run-laptop.ps1   # Windows
+   ```
+   The first run creates `.venv` (Python 3.11+, or uses `uv`) and downloads YAMNet. The script runs
+   in the foreground and Ctrl-C/SIGTERM exits cleanly. The UI is at `http://<laptop>.local:8100`.
+   It reads config only from the environment, with defaults `isr-pi.local`, user `isrkit`, port
+   8100, and data in `~/.local/share/isr-kit/acoustic-detector`. Set `ACOUSTIC_INPUT=simulate` or
+   `ACOUSTIC_INPUT=/path/clip.mp4` to run without the mic.
+4. On macOS, the first run asks for **Microphone** permission for the terminal app. If the input
+   peak stays flat, allow it in System Settings → Privacy & Security → Microphone and restart.
+
+Laptop mics apply noise suppression and AGC, and they are usually close to a fan. Expect less
+range than with the USB mic, and enrol a fresh background clip on that laptop.
+
+## Development run (no hardware)
 
 ```bash
 uv venv -p 3.11 .venv && uv pip install -p .venv/bin/python -r requirements-dev.txt
@@ -106,17 +167,88 @@ In the UI:
    wind and distant traffic matching your drone.
 3. The "My drone" bar now moves, and it counts for half of the base score.
 
-You can also enrol from files, for example audio pulled from GoPro footage:
+You can also **enrol from existing footage**. In the UI, under *From file*, pick an MP4/MOV
+(GoPro, phone, DVR) or a WAV/MP3, choose *as drone* or *as background*, and press **Enrol file**.
+The audio track is extracted on the device (PyAV, no ffmpeg needed) and the first 120 s are used.
+The result shows what percentage of the file contained a prop tone. From the command line:
 
 ```bash
-ffmpeg -i GX010123.MP4 -vn -ac 1 -ar 16000 fpv.wav
 sudo -u acoustic DATA_DIR=/var/lib/acoustic-detector \
-  /opt/acoustic-detector/.venv/bin/python -m acoustic --enroll fpv.wav --enroll-background field.wav
+  /opt/acoustic-detector/.venv/bin/python -m acoustic --enroll GX010123.MP4 --enroll-background office.wav
 ```
+
+**Which footage has usable audio?**
+- **DJI O3 / O4 air-unit recordings**: these may have **no audio track**. One forum reply says the
+  O4 doesn't record audio, and nothing official confirms either way. Just try one: the UI says
+  "has no audio track" if so.
+- **GoPro on the quad**: has audio, but the mic is centimetres from the props and full of wind.
+  It's still the right harmonic signature, so it's worth enrolling.
+- **A phone or GoPro filming the quad from the ground**: the best source, because it's what the
+  sensor actually hears.
 
 Clips are stored in `/var/lib/acoustic-detector/samples/{drone,background}/`. **Clear** deletes them.
 
-## Demo script
+## Office demo (no flying)
+
+The drone doesn't need to fly: play its sound through a speaker toward the mic.
+
+**Audio to play.** In order of preference:
+1. Your own footage of the 5" quad with an audio track (phone or GoPro filming from the ground).
+   Play the MP4 from the laptop, or extract the audio first.
+2. A public-domain clip: [*Quadrocopter Take-Off And Landing*](https://freesound.org/s/263022/) by
+   Alcappuccino on Freesound, licensed **CC0** (no attribution needed). It's a DJI Phantom 2
+   recorded from a GoPro on the drone, 59 s, 48 kHz WAV, and downloading it needs a free Freesound
+   account. A Phantom has bigger, slower props than a 5" FPV, so its tone sits lower, but it's well
+   inside the detector's range.
+
+**Setup.** Run the Pi with its USB mic (or the laptop fallback). Open the UI on the projector. Use a
+laptop or Bluetooth speaker about 1–2 m from the mic, starting at **low volume**. Then:
+
+1. **Baseline (1 min).** Leave the room noise running: talking, typing, air-con. The waterfall
+   moves, while the confidence stays low and the log stays empty. Point out the *YAMNet top* line
+   saying "Speech" when people talk. Press **Record background (5 s)** once while people chat
+   normally. This teaches the sensor what "this room" sounds like.
+2. **Enrol (1 min).** Under *From file*, enrol your drone footage *as drone* (or play it and press
+   **Record drone (5 s)** two or three times). The "My drone" bar becomes active.
+3. **Approach.** Play the drone clip and slowly raise the volume. The stacked horizontal lines of
+   the prop comb appear on the waterfall. The *Prop comb* and *My drone* bars rise, and when the
+   confidence crosses the red tick for 1.5 s the banner goes **DRONE DETECTED**. The ATAK marker and
+   the mesh text `ACOUSTIC: drone detected conf … @ OP1` follow immediately.
+4. **Recede.** Lower the volume and the confidence falls. About 3 s below the amber tick, the log
+   shows `clear`.
+5. **Cooldown.** Raise the volume again within 60 s: the log shows `suppressed` and no second mesh
+   text is sent.
+6. **Try to fool it.** Talk loudly, whistle, hum, or play music near the mic. Discuss what moves the
+   meter and what doesn't. A sustained whistle or hum is the honest weak spot: it's a steady tone,
+   exactly the feature being looked for.
+
+Tips: a speaker playing at moderate volume 1–2 m away reads like a real quad tens of metres away.
+Too loud a speaker clips the mic (the peak meter turns red). Small Bluetooth speakers can't
+reproduce much below ~150 Hz, which is fine for prop tones.
+
+## Tuning knobs
+
+| Env var | Default | Effect |
+|---|---|---|
+| `DETECT_ON` | 0.65 | Confidence needed to alert. Raise it to 0.75–0.8 if a noisy room false-triggers, lower it to 0.55 for more range. |
+| `DETECT_OFF` | 0.40 | Confidence below which the detection starts to clear. |
+| `DETECT_ON_FRAMES` | 3 | Consecutive 0.5 s windows above `DETECT_ON` before alerting. Raise it to 4–6 to ignore short bursts (a shout, a door). |
+| `DETECT_OFF_FRAMES` | 6 | Consecutive windows below `DETECT_OFF` before clearing. |
+| `ALERT_COOLDOWN` | 60 | Seconds before a new detection sends another mesh alert. |
+| `USE_YAMNET` | 1 | Keep it on indoors. YAMNet's "Speech" penalty is what keeps voices well clear of the threshold. |
+| Background clips | none | The single best false-positive fix: enrol 1–3 clips of the room or site with no drone. |
+
+**Office noise check (synthetic):** I checked the defaults against 4 synthesised voices (macOS
+`say`, about 40 s each), synthetic keyboard typing and synthetic air-con (broadband plus mains hum
+plus fan blade tones at 128 Hz and 300 Hz). Nothing triggered. With YAMNet on, speech peaked at 0.29
+confidence and keyboard/air-con at ≤ 0.04. With YAMNet **off**, high-pitched voices peaked at
+0.62–0.71, which is uncomfortably close to the threshold. So keep YAMNet on indoors, or raise
+`DETECT_ON` and enrol a background clip. I also ran 20 s of a real room through a Yeti Nano USB mic on a
+Mac (YAMNet heard speech, music and a passing vehicle): confidence peaked at **0.04** and nothing
+was logged. That's one room and one sample, so watch the meter for a minute in the actual room
+before the demo.
+
+## Demo script (field, flying)
 
 1. `sudo pi-profiles bft-acoustic`. Open the UI on a laptop or phone and ATAK on a tablet. Check
    that the chips read *Input MIC*, *ATAK connected* and *Mesh connected*, and that the Gemini chip
@@ -145,6 +277,8 @@ Clips are stored in `/var/lib/acoustic-detector/samples/{drone,background}/`. **
   this build. Measure your own on the day.
 - **No bearing, no range.** One mic gives presence only. That's why the ATAK marker sits on the
   sensor with a radius ring. Bearing needs a mic array (TDOA), which would be a good next step.
+- **Steady tones.** Whistling, humming, a singing kettle, some electric motors and a tonal fan can
+  all look like a prop tone. Pitch stability and continuity are exactly what the detector rewards.
 - **False positives.** Lawnmowers, strimmers, chainsaws, generators, motorbikes, model aircraft,
   wasps near the mic and some electric tools all make harmonic or buzzy sound. Low-frequency
   engines are mostly rejected by the comb check, and YAMNet's confuser classes pull the score down.

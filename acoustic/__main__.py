@@ -21,6 +21,13 @@ def parse_args(argv=None):
     p.add_argument("--enroll", nargs="+", metavar="CLIP", help="enrol clips of your drone and exit")
     p.add_argument("--enroll-background", nargs="+", metavar="CLIP", help="enrol background clips and exit")
     p.add_argument("--web-port", type=int, help="web UI port (default 8100)")
+    p.add_argument("--tak-host", help="TAK server host (env TAK_HOST, default 127.0.0.1)")
+    p.add_argument("--tak-port", type=int, help="TAK CoT TCP port (env TAK_PORT, default 8087)")
+    p.add_argument("--mqtt-host", help="MQTT broker on the Pi hub (env MQTT_HOST, default 127.0.0.1)")
+    p.add_argument("--mqtt-port", type=int, help="env MQTT_PORT, default 1883")
+    p.add_argument("--mqtt-user", help="env MQTT_USER (guest on the Pi, isrkit from a laptop)")
+    p.add_argument("--mqtt-pass", help="env MQTT_PASS (prefer the env var: CLI args show in ps)")
+    p.add_argument("--public-url", help="UI URL advertised in the heartbeat (env PUBLIC_URL)")
     p.add_argument("--no-cot", action="store_true", help="disable CoT output")
     p.add_argument("--no-mesh", action="store_true", help="disable meshbus alerts")
     p.add_argument("--no-yamnet", action="store_true", help="spectral features only")
@@ -35,8 +42,16 @@ def main(argv=None):
     s = Settings.from_env()
     if args.web_port:
         s.web_port = args.web_port
+    for arg, attr in (("tak_host", "tak_host"), ("tak_port", "tak_port"), ("mqtt_host", "mqtt_host"),
+                      ("mqtt_port", "mqtt_port"), ("mqtt_user", "mqtt_user"), ("mqtt_pass", "mqtt_pass"),
+                      ("public_url", "public_url")):
+        if getattr(args, arg) is not None:
+            setattr(s, attr, getattr(args, arg))
+    persisted = s.data_dir / "audio_device.txt"
     if args.device:
         s.audio_device = args.device
+    elif persisted.exists() and persisted.read_text().strip():
+        s.audio_device = persisted.read_text().strip()    # last choice made in the web UI
     if args.no_yamnet:
         s.use_yamnet = False
     if args.no_mesh:
@@ -77,8 +92,17 @@ def main(argv=None):
         try:
             source = MicSource(s.audio_device)
         except Exception as e:  # noqa: BLE001
-            log.error("No usable microphone (%s). Use --simulate or --file.", e)
-            return 2
+            if s.audio_device and not args.device:
+                log.warning("Saved/configured device %r unusable (%s); falling back to auto-select",
+                            s.audio_device, e)
+                try:
+                    source = MicSource(None)
+                except Exception as e2:  # noqa: BLE001
+                    log.error("No usable microphone (%s). Use --simulate or --file.", e2)
+                    return 2
+            else:
+                log.error("No usable microphone (%s). Use --simulate or --file.", e)
+                return 2
 
     from acoustic.cot import CotClient
     from acoustic.engine import Engine
@@ -86,13 +110,14 @@ def main(argv=None):
     from acoustic.meshbus import MeshBus
 
     cot_client = None if args.no_cot else CotClient(s.tak_host, s.tak_port).start()
-    mesh = None if not s.mesh_enabled else MeshBus(s.mqtt_host, s.mqtt_port, s.mqtt_user, s.mqtt_pass,
-                                                   s.mesh_to, s.mesh_channel).start()
+    # One MQTT client for both mesh alerts and the heartbeat. --no-mesh only stops alert texts.
+    mesh = MeshBus(s.mqtt_host, s.mqtt_port, s.mqtt_user, s.mqtt_pass, s.mesh_to, s.mesh_channel).start()
     gemini = GeminiChecker(s.gemini_api_key, s.gemini_model, s.gemini_min_interval_s)
     if not s.has_position and cot_client is not None:
         log.warning("SENSOR_LAT/SENSOR_LON not set: ATAK markers will not be sent")
 
     engine = Engine(s, yamnet=yamnet, cot_client=cot_client, mesh=mesh, gemini=gemini, source=source).start()
+    mesh.start_heartbeat(engine.heartbeat)
 
     import uvicorn
 
@@ -112,11 +137,18 @@ def main(argv=None):
         finally:
             task.cancel()
 
+    # uvicorn handles SIGTERM/SIGINT, then restores the previous handlers and re-raises the
+    # signal. With the default SIGTERM handler that kills us before cleanup, so install a
+    # no-op one: the re-raise lands here and we fall through to publish "stopped" and exit 0.
+    import signal
+
+    signal.signal(signal.SIGTERM, lambda signum, frame: None)
     try:
         asyncio.run(serve())
     except KeyboardInterrupt:
         pass
     finally:
+        log.info("Shutting down")
         engine.stop()
         if mesh:
             mesh.stop()

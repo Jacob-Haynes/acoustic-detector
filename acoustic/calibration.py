@@ -53,6 +53,7 @@ class Calibration:
         self.ref: dict[str, dict[str, np.ndarray]] = {}
         self.counts: dict[str, int] = {label: 0 for label in LABELS}
         self.last_warning: str | None = None
+        self.last_stats: dict | None = None
         for label in LABELS:
             (self.dir / label).mkdir(parents=True, exist_ok=True)
         self._load()
@@ -90,9 +91,12 @@ class Calibration:
         path = self.dir / label / f"{label}-{time.strftime('%Y%m%d-%H%M%S')}-{int(time.time() * 1000) % 1000:03d}.wav"
         audio = np.asarray(audio, dtype=np.float32)
         self.last_warning = None
+        ws = list(windows(audio))
+        good = sum(1 for w in ws if dsp.spectral_features(w).score >= MIN_DRONE_COMB)
+        self.last_stats = {"seconds": round(len(audio) / SAMPLE_RATE, 1), "windows": len(ws),
+                           "prop_tone_windows": good,
+                           "prop_tone_fraction": round(good / len(ws), 2) if ws else 0.0}
         if label == "drone":
-            ws = list(windows(audio))
-            good = sum(1 for w in ws if dsp.spectral_features(w).score >= MIN_DRONE_COMB)
             if not good:
                 self.last_warning = ("No prop tone found in that clip. Saved, but it only counts if the "
                                      "drone is audible; check distance/throttle or delete and retry.")

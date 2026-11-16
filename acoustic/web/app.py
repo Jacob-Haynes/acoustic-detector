@@ -6,9 +6,11 @@ import asyncio
 import base64
 import json
 import logging
+import tempfile
+import time
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
@@ -22,6 +24,10 @@ app = FastAPI(title="Acoustic Detector")
 
 engine = None   # set by __main__ (or tests)
 _clients: set[WebSocket] = set()
+
+
+class DeviceRequest(BaseModel):
+    device: int | str
 
 
 class RecordRequest(BaseModel):
@@ -62,6 +68,64 @@ async def record(req: RecordRequest):
     if not e.start_recording(req.label, seconds):
         raise HTTPException(409, "already recording")
     return {"recording": req.label, "seconds": seconds}
+
+
+ENROL_MAX_SECONDS = 120.0
+UPLOAD_MAX_BYTES = 2 * 1024 ** 3
+
+
+def _enrol_file(path: str, label: str) -> dict:
+    from acoustic.sources import NoAudioTrack, load_audio_file
+
+    e = _engine()
+    try:
+        audio = load_audio_file(path, max_seconds=ENROL_MAX_SECONDS)
+    except NoAudioTrack as err:
+        raise HTTPException(422, f"{err}. Some FPV air units record video only; use a GoPro or "
+                                 "phone recording of the drone instead.") from err
+    except Exception as err:  # noqa: BLE001
+        raise HTTPException(422, f"could not decode file: {err}") from err
+    if len(audio) < 16000:
+        raise HTTPException(422, "audio shorter than 1 s")
+    saved = e.calibration.add_clip(audio, label)
+    e._append_log({"kind": "enrolled", "ts": time.time(), "confidence": 0.0,
+                   "label": label, "file": saved.name})
+    return {"file": saved.name, "label": label, "warning": e.calibration.last_warning,
+            "stats": e.calibration.last_stats, "calibration": e.calibration.status()}
+
+
+@app.post("/api/enroll")
+async def enroll(file: UploadFile = File(...), label: str = Form("drone")):
+    """Enrol from an uploaded WAV/MP3/FLAC or video (MP4/MOV). The first 120 s are used."""
+    if label not in ("drone", "background"):
+        raise HTTPException(400, "label must be 'drone' or 'background'")
+    suffix = Path(file.filename or "upload").suffix[:8] or ".bin"
+    tmp_dir = Path(_engine().s.data_dir)      # not /tmp: often RAM-backed on the Pi
+    tmp_dir.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(suffix=suffix, dir=tmp_dir, delete=True) as tmp:
+        size = 0
+        while chunk := await file.read(1 << 20):
+            size += len(chunk)
+            if size > UPLOAD_MAX_BYTES:
+                raise HTTPException(413, "file too large (2 GB max)")
+            tmp.write(chunk)
+        tmp.flush()
+        result = await asyncio.to_thread(_enrol_file, tmp.name, label)
+    result["source_name"] = file.filename
+    return result
+
+
+@app.get("/api/devices")
+async def devices():
+    return await asyncio.to_thread(_engine().list_devices)
+
+
+@app.post("/api/device")
+async def set_device(req: DeviceRequest):
+    try:
+        return {"source": await asyncio.to_thread(_engine().switch_device, req.device)}
+    except Exception as err:  # noqa: BLE001
+        raise HTTPException(400, f"cannot use device {req.device!r}: {err}") from err
 
 
 @app.post("/api/calibration/clear")

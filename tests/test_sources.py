@@ -43,3 +43,6 @@ def test_pick_usb_input():
             {"name": "USB PnP Sound Device: Audio (hw:2,0)", "max_input_channels": 1}]
     assert pick_usb_input(devs) == 1
     assert pick_usb_input(devs[:1]) is None
+    alsa = [{"name": "default", "max_input_channels": 32},
+            {"name": "Yeti Nano: Audio (hw:3,0)", "max_input_channels": 2}]
+    assert pick_usb_input(alsa) == 1

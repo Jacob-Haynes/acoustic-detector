@@ -51,3 +51,73 @@ def test_websocket_snapshot(client):
     assert len(snap["wf"]) == 31 and "status" in snap
     with client.websocket_connect("/ws") as ws:
         ws.send_text("hi")
+
+
+def _mp4(path, with_audio, signal=None):
+    import av
+    import numpy as np
+
+    with av.open(str(path), "w") as c:
+        v = c.add_stream("mpeg4", rate=10)
+        v.width = v.height = 64
+        v.pix_fmt = "yuv420p"
+        a = None
+        if with_audio:
+            a = c.add_stream("aac", rate=48000)
+            a.layout = "mono"
+        for _ in range(10):
+            for pk in v.encode(av.VideoFrame.from_ndarray(np.zeros((64, 64, 3), np.uint8), format="rgb24")):
+                c.mux(pk)
+        if a is not None:
+            for i in range(0, len(signal), 1024):
+                fr = av.AudioFrame.from_ndarray(signal[i:i + 1024].reshape(1, -1), format="flt", layout="mono")
+                fr.sample_rate = 48000
+                for pk in a.encode(fr):
+                    c.mux(pk)
+            for pk in a.encode(None):
+                c.mux(pk)
+        for pk in v.encode(None):
+            c.mux(pk)
+
+
+def test_enroll_from_wav_upload(client, tmp_path):
+    import soundfile as sf
+
+    from conftest import tone_comb
+
+    wav = tmp_path / "fpv.wav"
+    sf.write(str(wav), tone_comb(380.0, seconds=3.0), 16000)
+    with open(wav, "rb") as fh:
+        r = client.post("/api/enroll", files={"file": ("fpv.wav", fh, "audio/wav")}, data={"label": "drone"})
+    assert r.status_code == 200, r.text
+    j = r.json()
+    assert j["calibration"]["enrolled"] and j["stats"]["prop_tone_fraction"] > 0.8 and j["warning"] is None
+
+
+def test_enroll_from_video_audio_track(client, tmp_path):
+    import numpy as np
+
+    pytest.importorskip("av")
+    t = np.arange(48000 * 3) / 48000
+    sig = sum(np.sin(2 * np.pi * 380 * k * t) / k for k in range(1, 9)).astype(np.float32) * 0.1
+    mp4 = tmp_path / "DJI_0001.MP4"
+    _mp4(mp4, True, sig)
+    with open(mp4, "rb") as fh:
+        r = client.post("/api/enroll", files={"file": ("DJI_0001.MP4", fh, "video/mp4")}, data={"label": "drone"})
+    assert r.status_code == 200, r.text
+    assert r.json()["stats"]["seconds"] >= 2.5
+
+
+def test_enroll_video_without_audio_is_explained(client, tmp_path):
+    pytest.importorskip("av")
+    mp4 = tmp_path / "silent.mp4"
+    _mp4(mp4, False)
+    with open(mp4, "rb") as fh:
+        r = client.post("/api/enroll", files={"file": ("silent.mp4", fh, "video/mp4")}, data={"label": "drone"})
+    assert r.status_code == 422 and "no audio track" in r.json()["detail"]
+
+
+def test_device_endpoints_in_non_mic_mode(client):
+    d = client.get("/api/devices").json()
+    assert d["switchable"] is False
+    assert client.post("/api/device", json={"device": 0}).status_code == 400

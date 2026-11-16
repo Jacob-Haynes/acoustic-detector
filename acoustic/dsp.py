@@ -102,6 +102,8 @@ class SpectralFeatures:
     comb_db: float         # mean harmonic prominence above the spectral floor (dB)
     n_harmonics: int       # harmonics with >6 dB prominence
     flatness: float        # spectral flatness (1 = white noise, 0 = pure tones)
+    continuity: float      # fraction of ~128 ms frames carrying a comb (prop tone ~1.0, speech ~0.8)
+    pitch_spread: float    # frame-to-frame comb pitch variation (prop ~0.02, speech ~0.05)
     score: float           # 0..1 hand-built "drone-ness"
 
     def as_dict(self) -> dict:
@@ -149,14 +151,19 @@ def spectral_features(x: np.ndarray, sr: int = SAMPLE_RATE, min_level_dbfs: floa
 
     # Harmonic comb, matched per short frame (~128 ms) so a drifting prop tone (throttle changes)
     # doesn't smear the harmonics, then summarised with the median over frames.
-    best_f0, best_comb, best_n = _comb_search(x, df)
+    best_f0, best_comb, best_n, continuity, spread = _comb_search(x, df)
 
     harm = np.clip((best_comb - 5.0) / 7.0, 0.0, 1.0)   # random noise scores ~4 dB here
     if best_n < 3:
         harm *= best_n / 3.0
     prior = 1.0 if F0_PRIOR_LO <= best_f0 <= F0_PRIOR_HI else 0.6
     level_gate = float(np.clip((level - min_level_dbfs) / 10.0, 0.0, 1.0))
-    score = float(harm * prior * (0.4 + 0.6 * band_ratio) * level_gate)
+    # Speech is also a harmonic comb (voice pitch 85-300 Hz), but it comes and goes between
+    # syllables and its pitch wanders (~4-6% frame to frame) where a prop tone is continuous
+    # and steady (~2-3%). Soft factors with floors, so a throttling drone is damped, not zeroed.
+    stability = float(np.clip(1.0 - (spread - 0.03) / 0.05, 0.3, 1.0))
+    steadiness = float(np.clip((continuity - 0.7) / 0.25, 0.2, 1.0))
+    score = float(harm * prior * (0.4 + 0.6 * band_ratio) * level_gate * stability * steadiness)
 
     return SpectralFeatures(
         level_dbfs=float(level),
@@ -165,6 +172,8 @@ def spectral_features(x: np.ndarray, sr: int = SAMPLE_RATE, min_level_dbfs: floa
         comb_db=float(best_comb),
         n_harmonics=best_n,
         flatness=flatness,
+        continuity=continuity,
+        pitch_spread=spread,
         score=score,
     )
 
@@ -181,10 +190,12 @@ def _comb_tables(df: float, n_bins: int):
 
 
 _COMB_CACHE: dict = {}
+FRAME_COMB_DB = 6.0        # a frame "has a comb" above this mean harmonic prominence
 
 
-def _comb_search(x: np.ndarray, df: float) -> tuple[float, float, int]:
-    """Best comb spacing f0, its mean harmonic prominence (dB) and harmonic count."""
+def _comb_search(x: np.ndarray, df: float) -> tuple[float, float, int, float, float]:
+    """Best comb spacing f0, its mean harmonic prominence (dB), harmonic count, the fraction of
+    frames that carry a comb (continuity) and the frame-to-frame pitch spread (stability)."""
     from scipy.ndimage import maximum_filter1d
 
     n_bins = FEAT_NFFT // 2 + 1
@@ -215,10 +226,19 @@ def _comb_search(x: np.ndarray, df: float) -> tuple[float, float, int]:
         combs.append(comb[i])
         counts.append(int(np.sum(on[i] > 6.0)))
     if not combs:
-        return 0.0, 0.0, 0
+        return 0.0, 0.0, 0, 0.0, 1.0
     order = np.argsort(combs)
     mid = order[len(order) // 2]
-    return float(np.median(f0s)), float(np.median(combs)), int(counts[mid])
+    f0_arr, comb_arr = np.array(f0s), np.array(combs)
+    good = comb_arr > FRAME_COMB_DB
+    continuity = float(good.mean())
+    spread = 1.0
+    if good.sum() >= 2:
+        r = f0_arr[good] / np.median(f0_arr[good])
+        # forgive octave slips (the best comb can flip between f0 and 2*f0)
+        d = np.minimum.reduce([np.abs(r - 1), np.abs(r - 2) / 2, np.abs(r - 0.5) * 2])
+        spread = float(np.median(d))
+    return float(np.median(f0s)), float(np.median(combs)), int(counts[mid]), continuity, spread
 
 
 # ---------------------------------------------------------------------------------------------

@@ -58,6 +58,7 @@
   button:disabled { opacity: .45; cursor: not-allowed; }
   button.primary { background: #1f3a5f; border-color: #2f5f9a; }
   button.cloud { border-color: var(--cloud); }
+  select, input[type=file] { background: #21262d; color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 5px; font: inherit; max-width: 100%; }
   .progress { height: 4px; background: #0b0f14; border-radius: 2px; margin-top: 8px; overflow: hidden; }
   .progress div { height: 100%; width: 0; background: var(--bad); }
   .small { font-size: 12px; color: var(--muted); }
@@ -113,11 +114,30 @@
     </section>
 
     <section class="panel">
+      <h2>Microphone</h2>
+      <div class="btns">
+        <select id="dev-select" style="flex:1;min-width:0"><option>loading…</option></select>
+        <button id="dev-use">Use</button>
+        <button id="dev-refresh" title="re-scan devices">↻</button>
+      </div>
+      <div class="comp" style="margin-top:8px"><span>Input peak</span><div class="bar"><div id="peakbar"></div></div><span class="num" id="peakval">–</span></div>
+      <div class="small" id="devinfo"></div>
+    </section>
+
+    <section class="panel">
       <h2>Teach it your drone</h2>
       <div class="btns">
         <button class="primary" id="rec-drone">● Record drone (5 s)</button>
         <button id="rec-bg">● Record background (5 s)</button>
         <button id="cal-clear">Clear</button>
+      </div>
+      <div class="btns" style="margin-top:8px">
+        <label class="small" style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+          From file (MP4/MOV/WAV/MP3):
+          <input type="file" id="enrol-file" accept="audio/*,video/*,.mp4,.mov,.wav,.mp3,.flac,.ogg,.m4a">
+        </label>
+        <select id="enrol-label"><option value="drone">as drone</option><option value="background">as background</option></select>
+        <button id="enrol-go">Enrol file</button>
       </div>
       <div class="progress"><div id="recprog"></div></div>
       <p class="small" id="calinfo">Hover or fly the drone 5–30 m from the mic, then press Record drone. Do 3–5 clips at different throttle and distance, plus 1–2 background clips with the drone off.</p>
@@ -292,6 +312,15 @@ function renderStatus(s) {
     ["Cooldown", s.detector.cooldown_s + " s between alerts"],
   ].map(([k, v]) => `<span>${k}</span><span>${v}</span>`).join("");
 
+  // microphone
+  $("peakbar").style.width = Math.min(100, (src.peak || 0) * 100) + "%";
+  $("peakbar").style.background = src.clipping ? "var(--bad)" : (src.peak < 0.01 ? "var(--warn)" : "var(--ok)");
+  $("peakval").textContent = src.peak !== undefined ? src.peak.toFixed(2) : "–";
+  $("devinfo").textContent = src.error ? "⚠ " + src.error
+    : src.clipping ? "⚠ Clipping: turn the capture gain down (alsamixer) or move the mic away."
+    : (src.kind === "mic" && src.peak < 0.003) ? "Very quiet input: check the mic is selected and capture gain is up."
+    : src.description;
+
   // recording
   const rec = s.recording;
   $("recprog").style.width = rec ? (rec.progress * 100) + "%" : "0";
@@ -348,6 +377,34 @@ async function post(url, body) {
 }
 $("rec-drone").onclick = () => post("/api/record", { label: "drone", seconds: 5 }).catch(e => alert(e.message));
 $("rec-bg").onclick = () => post("/api/record", { label: "background", seconds: 5 }).catch(e => alert(e.message));
+$("enrol-go").onclick = async () => {
+  const f = $("enrol-file").files[0];
+  if (!f) { alert("Pick a video or audio file first"); return; }
+  const fd = new FormData(); fd.append("file", f); fd.append("label", $("enrol-label").value);
+  $("enrol-go").disabled = true; $("calinfo").textContent = `Decoding and enrolling ${f.name}…`;
+  try {
+    const r = await fetch("/api/enroll", { method: "POST", body: fd });
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.detail || r.statusText);
+    const st = j.stats || {};
+    $("calinfo").textContent = `Enrolled ${f.name} as ${j.label}: ${st.seconds}s, prop tone in ${Math.round((st.prop_tone_fraction || 0) * 100)}% of it.` + (j.warning ? " ⚠ " + j.warning : "");
+  } catch (e) { $("calinfo").textContent = "Enrol failed: " + e.message; }
+  finally { $("enrol-go").disabled = false; }
+};
+async function loadDevices() {
+  try {
+    const d = await (await fetch("/api/devices")).json();
+    const sel = $("dev-select");
+    sel.innerHTML = d.devices.map(x => `<option value="${x.index}" ${x.index === d.current ? "selected" : ""}>${x.index}: ${esc(x.name)} (${x.default_rate} Hz)</option>`).join("")
+      || `<option>no input devices found</option>`;
+    sel.disabled = !d.switchable; $("dev-use").disabled = !d.switchable;
+    if (!d.switchable) sel.title = "Device switching is only available in microphone mode";
+  } catch (e) { $("dev-select").innerHTML = `<option>device list unavailable</option>`; }
+}
+$("dev-refresh").onclick = loadDevices;
+$("dev-use").onclick = () => post("/api/device", { device: parseInt($("dev-select").value, 10) })
+  .then(r => { $("devinfo").textContent = "Now using " + r.source; loadDevices(); }).catch(e => alert(e.message));
+loadDevices();
 $("cal-clear").onclick = () => { if (confirm("Delete all enrolled clips?")) post("/api/calibration/clear").catch(e => alert(e.message)); };
 $("gem-ask").onclick = () => post("/api/gemini").catch(e => alert(e.message));
 $("test").onclick = () => post("/api/test-alert").then(r => {

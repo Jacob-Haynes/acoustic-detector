@@ -73,3 +73,13 @@ def test_test_alert(settings):
     r = e.test_alert()
     assert r == {"mesh_sent": True, "cot_queued": True}
     assert "TEST" in mesh.texts[0]
+
+
+def test_heartbeat_fields(settings):
+    from acoustic.sources import SimSource
+
+    e = Engine(settings, source=SimSource())
+    hb = e.heartbeat()
+    assert hb["mode"] == "simulate" and hb["status"] == "ok"
+    assert hb["url"].endswith(":8100")
+    assert Engine(settings).heartbeat()["status"] == "error"      # no audio input at all

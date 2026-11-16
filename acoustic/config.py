@@ -94,13 +94,14 @@ class Settings:
 
     audio_device: str | None = None
     web_port: int = 8100
+    public_url: str | None = None       # URL advertised in the heartbeat (default: auto)
     data_dir: Path = field(default_factory=_default_data_dir)
     yamnet_model: Path = field(default_factory=_default_model_path)
     use_yamnet: bool = True
 
     detect_on: float = 0.65
     detect_off: float = 0.40
-    on_frames: int = 2                  # consecutive windows above detect_on to trigger
+    on_frames: int = 3                  # consecutive 0.5 s windows above detect_on to trigger
     off_frames: int = 6                 # consecutive windows below detect_off to clear
     alert_cooldown_s: float = 60.0
     min_level_dbfs: float = -65.0       # quieter than this is treated as silence
@@ -130,11 +131,14 @@ class Settings:
         s.gemini_auto = _env_bool("GEMINI_AUTO", s.gemini_auto)
         s.audio_device = _env("AUDIO_DEVICE", None)
         s.web_port = _env_int("WEB_PORT", s.web_port)
+        s.public_url = _env("PUBLIC_URL", None)
         if _env("DATA_DIR"):
             s.data_dir = Path(_env("DATA_DIR"))
         if _env("YAMNET_MODEL"):
             s.yamnet_model = Path(_env("YAMNET_MODEL"))
         s.use_yamnet = _env_bool("USE_YAMNET", s.use_yamnet)
+        s.on_frames = max(1, _env_int("DETECT_ON_FRAMES", s.on_frames))
+        s.off_frames = max(1, _env_int("DETECT_OFF_FRAMES", s.off_frames))
         s.detect_on = _env_float("DETECT_ON", s.detect_on)
         s.detect_off = _env_float("DETECT_OFF", s.detect_off)
         s.alert_cooldown_s = _env_float("ALERT_COOLDOWN", s.alert_cooldown_s)

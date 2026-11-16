@@ -60,6 +60,8 @@ class Engine:
         self.history: collections.deque[tuple[float, float]] = collections.deque(maxlen=240)
         self.log: collections.deque[dict] = collections.deque(maxlen=200)
         self._last_sensor_marker = 0.0
+        self._started = time.time()
+        self._peak = 0.0
         self._last_active_send = 0.0
         self._log_path = Path(settings.data_dir) / "detections.jsonl"
         if self.gemini is not None:
@@ -71,6 +73,8 @@ class Engine:
     def feed(self, block: np.ndarray):
         block = np.asarray(block, dtype=np.float32)
         n = len(block)
+        if n:
+            self._peak = max(float(np.max(np.abs(block))), self._peak * 0.9)
         with self._lock:
             end = self._ring_pos + n
             if end <= len(self._ring):
@@ -286,6 +290,51 @@ class Engine:
         self._append_log({"kind": "test", "ts": time.time(), "confidence": 0.0})
         return {"mesh_sent": mesh_ok, "cot_queued": cot_sent}
 
+    def list_devices(self) -> dict:
+        from acoustic.sources import list_input_devices
+
+        current = getattr(self.source, "device", None) if getattr(self.source, "kind", "") == "mic" else None
+        try:
+            devices = list_input_devices()
+        except Exception as e:  # noqa: BLE001
+            return {"devices": [], "current": None, "error": str(e), "switchable": False}
+        return {"devices": devices, "current": current,
+                "switchable": getattr(self.source, "kind", "") == "mic"}
+
+    def switch_device(self, device) -> str:
+        if getattr(self.source, "kind", "") != "mic":
+            raise ValueError("input is not the microphone (running in simulate/file mode)")
+        desc = self.source.switch(device)
+        try:
+            (Path(self.s.data_dir) / "audio_device.txt").write_text(str(self.source.requested))
+        except OSError:
+            pass
+        return desc
+
+    def heartbeat(self) -> dict:
+        """Fields for the isrkit heartbeat (tool/ts are added by meshbus)."""
+        kind = getattr(self.source, "kind", "none")
+        if kind == "simulate":
+            mode = "simulate"
+        elif kind == "file":
+            mode = "replay"
+        elif self.gemini is not None and self.gemini.enabled:
+            mode = "gemini"
+        else:
+            mode = "cpu"
+        status = "ok"
+        if getattr(self.source, "error", None) or (kind == "none"):
+            status = "error"                      # no working audio input
+        elif getattr(self.source, "finished", False):
+            status = "degraded"                   # file replay ended
+        elif (self.cot is not None and self.s.has_position and not self.cot.connected
+              and time.time() - self._started > 30):
+            status = "degraded"                   # TAK unreachable
+        elif self.yamnet is not None and not self.yamnet.available and self.s.use_yamnet:
+            status = "degraded"                   # running spectral-only
+        return {"host": meshbus.short_hostname(), "url": meshbus.advertised_url(self.s.web_port, self.s.public_url),
+                "mode": mode, "status": status}
+
     def start(self):
         threading.Thread(target=self._analysis_loop, name="analysis", daemon=True).start()
         if self.source is not None:
@@ -305,7 +354,8 @@ class Engine:
             "sensor": {"name": self.s.sensor_name, "lat": self.s.sensor_lat, "lon": self.s.sensor_lon,
                        "has_position": self.s.has_position},
             "source": {"kind": getattr(src, "kind", "none"), "description": getattr(src, "description", ""),
-                       "finished": getattr(src, "finished", False)},
+                       "finished": getattr(src, "finished", False), "error": getattr(src, "error", None),
+                       "peak": round(self._peak, 3), "clipping": self._peak >= 0.99},
             "detector": {
                 "yamnet": bool(self.yamnet is not None and self.yamnet.available),
                 "yamnet_reason": "" if self.yamnet is None else getattr(self.yamnet, "reason", ""),

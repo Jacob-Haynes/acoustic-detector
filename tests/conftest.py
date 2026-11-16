@@ -10,9 +10,12 @@ def tone_comb(f0=380.0, seconds=1.0, harmonics=10, level=0.05, jitter=0.0, seed=
     rng = np.random.default_rng(seed)
     t = np.arange(int(seconds * SR)) / SR
     x = np.zeros_like(t)
+    # true FM: instantaneous pitch f0 * (1 + jitter * sin(2*pi*0.7*t))
+    fm = 0.7
+    phase = 2 * np.pi * f0 * (t - jitter / (2 * np.pi * fm) * np.cos(2 * np.pi * fm * t))
     for k in range(1, harmonics + 1):
         if k * f0 < SR / 2 - 100:
-            x += np.sin(2 * np.pi * k * f0 * t * (1 + jitter * np.sin(2 * np.pi * 0.7 * t))) / k ** 0.8
+            x += np.sin(k * phase) / k ** 0.8
     x = level * x / np.max(np.abs(x)) + rng.standard_normal(len(t)) * level * 0.05
     return x.astype(np.float32)
 
