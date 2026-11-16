@@ -81,6 +81,6 @@ fi
 echo ""
 echo "=== Install complete ==="
 echo "  sudo pi-profiles acoustic-detector   # standalone sensor"
-echo "  sudo pi-profiles bft-acoustic        # with OpenTAKServer + mesh bridge (ATAK + mesh alerts)"
+echo "  (combined scenario profiles with OpenTAKServer + mesh bridge come from pi-profiles)"
 echo "  journalctl -u $APP -f                # logs"
 echo "  Web UI: http://<pi-ip>:8100"

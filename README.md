@@ -73,9 +73,12 @@ it**. pi-profiles starts and stops it:
 
 ```bash
 sudo pi-profiles acoustic-detector   # mic sensor on its own
-sudo pi-profiles bft-acoustic        # + opentakserver + mesh-bridge (ATAK markers + mesh alerts)
 journalctl -u acoustic-detector -f
 ```
+
+ATAK markers need OpenTAKServer (`opentakserver`), and mesh alerts need the blufor-tracker bridge
+(`mesh-bridge`) plus RabbitMQ. Combined scenario profiles that run this sensor alongside them are
+defined in the pi-platform (pi-profiles) repo, not here.
 
 Web UI: `http://<pi-ip>:8100`.
 
@@ -250,7 +253,8 @@ before the demo.
 
 ## Demo script (field, flying)
 
-1. `sudo pi-profiles bft-acoustic`. Open the UI on a laptop or phone and ATAK on a tablet. Check
+1. Start a pi-platform scenario profile that includes `acoustic-detector`, `opentakserver` and
+   `mesh-bridge` (see the pi-profiles repo). Open the UI on a laptop or phone and ATAK on a tablet. Check
    that the chips read *Input MIC*, *ATAK connected* and *Mesh connected*, and that the Gemini chip
    reads *OFFLINE* (or *CLOUD* if you chose to enable it).
 2. Talk next to the mic: the waterfall moves, and the confidence stays low. *"It's listening for a
@@ -326,7 +330,7 @@ acoustic/            python package (python -m acoustic)
   cot.py meshbus.py gemini.py   outputs
   web/               FastAPI app + static UI
 deploy/              install.sh, start.sh, systemd unit, env example
-profiles.d/          pi-profiles configs (acoustic-detector, bft-acoustic)
+profiles.d/          pi-profiles config for this tool only (combined profiles live in pi-profiles)
 tests/               pytest
 ```
 
