@@ -1,6 +1,3 @@
-import socket
-import threading
-import time
 import xml.etree.ElementTree as ET
 
 from acoustic import cot
@@ -33,50 +30,6 @@ def test_sensor_event():
     assert root.find("detail/contact").get("callsign") == "ACOUSTIC MIC1"
 
 
-def _free_port():
-    s = socket.socket()
-    s.bind(("127.0.0.1", 0))
-    port = s.getsockname()[1]
-    s.close()
-    return port
-
-
-def test_client_survives_server_down():
-    c = cot.CotClient("127.0.0.1", _free_port(), max_backoff=0.2).start()
-    for _ in range(300):          # more than the queue size: must not block or raise
-        c.send("<event/>")
-    time.sleep(0.5)
-    assert not c.connected
-    c.stop()
-
-
-def test_client_delivers_and_reconnects():
-    port = _free_port()
-    received = []
-    srv = socket.socket()
-    srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    srv.bind(("127.0.0.1", port))
-    srv.listen(1)
-
-    def accept():
-        conn, _ = srv.accept()
-        conn.settimeout(3)
-        data = b""
-        while b"</event>" not in data:
-            data += conn.recv(4096)
-        received.append(data.decode())
-        conn.close()
-
-    t = threading.Thread(target=accept, daemon=True)
-    t.start()
-    c = cot.CotClient("127.0.0.1", port, max_backoff=0.2).start()
-    c.send(cot.sensor_event("MIC1", 1, 2, 3, "test"))
-    t.join(5)
-    srv.close()
-    c.stop()
-    assert received and "ACOUSTIC-MIC1" in received[0]
-
-
 def test_remarks_prefix_c43():
     sim = ET.fromstring(cot.detection_event("MIC1", 52.0, -1.0, 0, 0.8, 300, source="simulate").encode())
     assert sim.find("detail/remarks").text.startswith("SIMULATED: ")
@@ -95,18 +48,3 @@ def test_valid_position_c42():
     assert not cot.valid_position(95.0, 1.0)
     assert cot.valid_position(52.0, -1.0)
     assert cot.valid_position(0.0, -1.0)          # equator is a real place
-
-
-def test_cot_rate_limit_per_uid_c44():
-    t = [0.0]
-    c = cot.CotClient("127.0.0.1", 1, clock=lambda: t[0])       # not started: just queues
-    det = cot.detection_event("MIC1", 52.0, -1.0, 0, 0.8, 300)
-    marker = cot.sensor_event("MIC1", 52.0, -1.0, 0, "listening")
-    assert c.send(det)
-    assert c.send(marker)                  # different uid: allowed
-    t[0] = 4.9
-    assert not c.send(det)
-    assert not c.send(marker)
-    t[0] = 5.1
-    assert c.send(det)
-    assert c.throttled == 2 and c._q.qsize() == 3

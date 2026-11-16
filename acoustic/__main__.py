@@ -104,12 +104,17 @@ def main(argv=None):
                 log.error("No usable microphone (%s). Use --simulate or --file.", e)
                 return 2
 
-    from acoustic.cot import CotClient
+    from acoustic import __version__
     from acoustic.engine import Engine
     from acoustic.gemini import GeminiChecker
-    from acoustic.meshbus import MeshBus
+    from acoustic.meshbus import MeshBus, station_host
+    from acoustic.tak_client import TakClient
 
-    cot_client = None if args.no_cot else CotClient(s.tak_host, s.tak_port).start()
+    # Contract v5: one long-lived connection, registered as an EUD before any marker is sent.
+    cot_client = None if args.no_cot else TakClient(
+        s.tak_host, s.tak_port, tool="acoustic-detector", station=station_host(), label="ACOUSTIC",
+        lat=s.sensor_lat if s.has_position else None, lon=s.sensor_lon if s.has_position else None,
+        hae=s.sensor_hae, version=__version__).start()
     # One MQTT client for both mesh alerts and the heartbeat. --no-mesh only stops alert texts.
     mesh = MeshBus(s.mqtt_host, s.mqtt_port, s.mqtt_user, s.mqtt_pass, s.mesh_to, s.mesh_channel).start()
     gemini = GeminiChecker(s.gemini_api_key, s.gemini_model, s.gemini_min_interval_s)

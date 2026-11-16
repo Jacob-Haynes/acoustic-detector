@@ -1,15 +1,9 @@
-"""Plain CoT XML over TCP to the TAK server (OpenTAKServer on 127.0.0.1:8087 by default).
-
-A background thread owns the socket and reconnects with exponential backoff, so a missing TAK
-server never blocks or crashes detection."""
+"""CoT XML builders for the acoustic markers. Transport (one registered, long-lived connection to
+the TAK server) lives in acoustic.tak_client."""
 
 from __future__ import annotations
 
 import logging
-import queue
-import re
-import socket
-import threading
 import time
 from datetime import datetime, timezone
 from xml.sax.saxutils import escape, quoteattr
@@ -18,7 +12,6 @@ logger = logging.getLogger(__name__)
 
 DETECTION_STALE_S = 90
 SENSOR_STALE_S = 300
-COT_MIN_INTERVAL_S = 5.0       # contract C4.4: at most one CoT per 5 s per uid
 
 # Contract C4.3: remarks of synthetic / replayed output start with these. Live mic: no prefix.
 _REMARK_PREFIX = {"simulate": "SIMULATED: ", "file": "RECORDED: "}
@@ -81,97 +74,3 @@ def sensor_event(sensor_name: str, lat: float, lon: float, hae: float, status: s
     remarks = remarks_prefix(source) + f"Acoustic drone sensor {sensor_name}: {status}"
     return build_event(uid, "a-f-G-E-S", lat, lon, hae, f"ACOUSTIC {sensor_name}", remarks,
                        SENSOR_STALE_S, ce=5.0, how="h-e", now=now)
-
-
-_UID_RE = re.compile(r"""<event\b[^>]*\buid=(["'])(.*?)\1""")
-
-
-class CotClient:
-    def __init__(self, host: str, port: int, max_backoff: float = 30.0,
-                 min_interval_s: float = COT_MIN_INTERVAL_S, clock=time.monotonic):
-        self.host, self.port = host, port
-        self.min_interval_s = min_interval_s
-        self._clock = clock
-        self._last_by_uid: dict[str, float] = {}
-        self.throttled = 0
-        self.max_backoff = max_backoff
-        self.connected = False
-        self.sent = 0
-        self._q: queue.Queue[str] = queue.Queue(maxsize=100)
-        self._stop = threading.Event()
-        self._thread = threading.Thread(target=self._run, name="cot", daemon=True)
-
-    def start(self):
-        self._thread.start()
-        return self
-
-    def stop(self):
-        self._stop.set()
-
-    def send(self, xml: str) -> bool:
-        """Queue a CoT event. Returns False if the per-uid rate limit dropped it."""
-        m = _UID_RE.search(xml)
-        if m and self.min_interval_s > 0:
-            uid, now = m.group(2), self._clock()
-            last = self._last_by_uid.get(uid)
-            if last is not None and now - last < self.min_interval_s:
-                self.throttled += 1
-                logger.debug("CoT rate limit for %s; dropped", uid)
-                return False
-            self._last_by_uid[uid] = now
-        self._enqueue(xml)
-        return True
-
-    def _enqueue(self, xml: str):
-        try:
-            self._q.put_nowait(xml)
-        except queue.Full:
-            try:
-                self._q.get_nowait()       # drop oldest, keep newest
-            except queue.Empty:
-                pass
-            self._q.put_nowait(xml)
-
-    def _run(self):
-        backoff = 1.0
-        sock: socket.socket | None = None
-        while not self._stop.is_set():
-            try:
-                xml = self._q.get(timeout=1.0)
-            except queue.Empty:
-                continue
-            while not self._stop.is_set():
-                if sock is None:
-                    try:
-                        sock = socket.create_connection((self.host, self.port), timeout=5)
-                        self.connected = True
-                        backoff = 1.0
-                        logger.info("TAK connected %s:%d", self.host, self.port)
-                    except OSError as e:
-                        self.connected = False
-                        logger.warning("TAK %s:%d unavailable (%s); retry in %.0fs",
-                                       self.host, self.port, e, backoff)
-                        if self._stop.wait(backoff):
-                            return
-                        backoff = min(backoff * 2, self.max_backoff)
-                        # keep only the freshest message while the server is down
-                        try:
-                            while True:
-                                xml = self._q.get_nowait()
-                        except queue.Empty:
-                            pass
-                        continue
-                try:
-                    sock.sendall(xml.encode("utf-8"))
-                    self.sent += 1
-                    break
-                except OSError as e:
-                    logger.warning("TAK send failed (%s); reconnecting", e)
-                    try:
-                        sock.close()
-                    except OSError:
-                        pass
-                    sock = None
-                    self.connected = False
-        if sock is not None:
-            sock.close()

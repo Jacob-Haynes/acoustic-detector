@@ -51,6 +51,16 @@ the lowercased short hostname. A clean exit leaves `stopped`. A crash
 leaves `error` through the MQTT last-will. The Pi launcher uses this to list the tool wherever
 it runs.
 
+**TAK connection.** OpenTAKServer drops CoT from senders that aren't a registered EUD, so the
+sensor keeps one long-lived TCP connection to `TAK_HOST:TAK_PORT`
+([`acoustic/tak_client.py`](acoustic/tak_client.py), standard library only). On every
+(re)connect it waits 3 s, then registers with a stable uid `isrkit-acoustic-detector-<ISR_HOST>`
+and callsign `ACOUSTIC <ISR_HOST>` (an `a-f-G-E-S` SA with a contact endpoint, the Cyan group and
+`takv`), re-sent every 60 s. All markers then go out on that connection under their own uids. With
+no sensor position the registration uses the never-drawn unknown point (0,0, errors 9999999,
+stale = start). Because the callsign must be unique on the server, give each station its own
+`ISR_HOST`.
+
 If OpenTAKServer or the MQTT broker is down, the sensor logs it, keeps detecting, and reconnects
 with backoff.
 
@@ -369,7 +379,7 @@ acoustic/            python package (python -m acoustic)
   engine.py          audio ring buffer, analysis loop, outputs, recording
   sources.py         USB mic (sounddevice), file replay, simulator source
   simulator.py       synthetic soundscape
-  cot.py meshbus.py gemini.py   outputs
+  cot.py meshbus.py gemini.py   outputs (tak_client.py: registered TAK connection)
   web/               FastAPI app + static UI
 deploy/              install.sh, start.sh, systemd unit, env example
 profiles.d/          pi-profiles config for this tool only (combined profiles live in pi-profiles)
