@@ -46,6 +46,7 @@ def test_publishes_to_meshbus_tx():
 
 
 def test_heartbeat_contract(monkeypatch):
+    monkeypatch.delenv("ISR_HOST", raising=False)
     monkeypatch.setattr(meshbus.socket, "gethostname", lambda: "isr-pi.lan")
     hb = meshbus.heartbeat_payload(meshbus.short_hostname(), meshbus.advertised_url(8100), "cpu", "ok", ts=12.7)
     assert hb == {"tool": "acoustic-detector", "host": "isr-pi", "url": "http://isr-pi.local:8100",
@@ -89,3 +90,40 @@ def test_heartbeat_published_retained_and_stopped_on_exit():
     assert all(r for _, _, r in published)
     assert published[0][1]["status"] == "ok" and published[-1][1]["status"] == "stopped"
     assert set(published[0][1]) == {"tool", "host", "url", "mode", "status", "ts"}
+
+
+def test_station_host_c41(monkeypatch):
+    monkeypatch.setattr(meshbus.socket, "gethostname", lambda: "Field-Laptop.local")
+    monkeypatch.delenv("ISR_HOST", raising=False)
+    assert meshbus.station_host() == "field-laptop"
+    monkeypatch.setenv("ISR_HOST", "isr-droneops")
+    assert meshbus.station_host() == "isr-droneops"
+    assert meshbus.advertised_url(8100) == "http://isr-droneops.local:8100"
+
+
+def test_mesh_tags_c43():
+    assert meshbus.alert_text(0.9, "OP1", "simulate").startswith("[SIM] ACOUSTIC: drone detected")
+    assert meshbus.alert_text(0.9, "OP1", "file").startswith("[REC] ACOUSTIC:")
+    assert meshbus.alert_text(0.9, "OP1", "mic").startswith("ACOUSTIC:")      # live: no tag
+    assert meshbus.clear_text("OP1", 0.8, "simulate").startswith("[SIM] ")
+    assert meshbus.test_text("OP1", "file").startswith("[REC] ")
+
+
+def test_mesh_rate_limit_c44():
+    class Info:
+        rc = 0
+
+    class FakeClient:
+        def publish(self, topic, payload, qos=0):
+            return Info()
+
+    t = [1000.0]
+    bus = meshbus.MeshBus("127.0.0.1", 1883, "guest", "guest", clock=lambda: t[0])
+    bus._client, bus.connected = FakeClient(), True
+    assert bus.send("one")
+    t[0] += 29.0
+    assert not bus.send("two")             # inside 30 s: dropped
+    assert bus.throttled == 1
+    t[0] += 1.5
+    assert bus.send("three")
+    assert bus.sent == 2

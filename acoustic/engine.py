@@ -168,6 +168,10 @@ class Engine:
         self._periodic_outputs(now)
         return state
 
+    @property
+    def source_kind(self) -> str:
+        return getattr(self.source, "kind", "") or ""
+
     def _handle_event(self, event):
         entry = event.as_dict()
         self._append_log(entry)
@@ -175,7 +179,7 @@ class Engine:
             logger.warning("DRONE DETECTED conf %.2f f0 %.0f Hz", event.confidence, event.details.get("f0_hz", 0))
             self._send_detection_cot(event.confidence, event.details.get("f0_hz", 0.0))
             if self.mesh is not None and self.s.mesh_enabled:
-                self.mesh.send(meshbus.alert_text(event.confidence, self.s.sensor_name))
+                self.mesh.send(meshbus.alert_text(event.confidence, self.s.sensor_name, self.source_kind))
             if self.gemini is not None and self.gemini.enabled and self.s.gemini_auto:
                 self.gemini.request(self.tail(GEMINI_CLIP_S), trigger="auto")
         elif event.kind == "suppressed":
@@ -184,7 +188,8 @@ class Engine:
         elif event.kind == "clear":
             logger.info("Clear (peak %.2f)", event.details.get("peak", 0))
             if self.mesh is not None and self.s.mesh_enabled and self.s.mesh_clear_msg:
-                self.mesh.send(meshbus.clear_text(self.s.sensor_name, event.details.get("peak", 0)))
+                self.mesh.send(meshbus.clear_text(self.s.sensor_name, event.details.get("peak", 0),
+                                                  self.source_kind))
 
     def _append_log(self, entry: dict):
         self.log.appendleft(entry)
@@ -201,7 +206,7 @@ class Engine:
                 logger.warning("SENSOR_LAT/SENSOR_LON not set; CoT detection marker not sent")
             return
         self._last_active_send = time.time()
-        src = getattr(self.source, "kind", "")
+        src = self.source_kind
         self.cot.send(cot.detection_event(self.s.sensor_name, self.s.sensor_lat, self.s.sensor_lon,
                                           self.s.sensor_hae, confidence, self.s.detect_radius_m,
                                           self.s.cot_affiliation, f0, source=src))
@@ -213,7 +218,7 @@ class Engine:
             self._last_sensor_marker = now
             status = "DRONE DETECTED" if self.hyst.active else "listening"
             self.cot.send(cot.sensor_event(self.s.sensor_name, self.s.sensor_lat, self.s.sensor_lon,
-                                           self.s.sensor_hae, status))
+                                           self.s.sensor_hae, status, source=self.source_kind))
         if self.hyst.active and now - self._last_active_send >= ACTIVE_RESEND_S:
             self._send_detection_cot(self.hyst.smoothed, self.state.get("spectral", {}).get("f0_hz", 0.0))
 
@@ -281,11 +286,11 @@ class Engine:
     def test_alert(self) -> dict:
         mesh_ok = False
         if self.mesh is not None:
-            mesh_ok = self.mesh.send(f"ACOUSTIC: TEST alert @ {self.s.sensor_name} (not a detection)")
+            mesh_ok = self.mesh.send(meshbus.test_text(self.s.sensor_name, self.source_kind))
         cot_sent = False
         if self.cot is not None and self.s.has_position:
             self.cot.send(cot.sensor_event(self.s.sensor_name, self.s.sensor_lat, self.s.sensor_lon,
-                                           self.s.sensor_hae, "TEST alert"))
+                                           self.s.sensor_hae, "TEST alert", source=self.source_kind))
             cot_sent = True
         self._append_log({"kind": "test", "ts": time.time(), "confidence": 0.0})
         return {"mesh_sent": mesh_ok, "cot_queued": cot_sent}
@@ -332,7 +337,7 @@ class Engine:
             status = "degraded"                   # TAK unreachable
         elif self.yamnet is not None and not self.yamnet.available and self.s.use_yamnet:
             status = "degraded"                   # running spectral-only
-        return {"host": meshbus.short_hostname(), "url": meshbus.advertised_url(self.s.web_port, self.s.public_url),
+        return {"host": meshbus.station_host(), "url": meshbus.advertised_url(self.s.web_port, self.s.public_url),
                 "mode": mode, "status": status}
 
     def start(self):

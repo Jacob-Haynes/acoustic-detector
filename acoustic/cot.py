@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import logging
 import queue
+import re
 import socket
 import threading
 import time
@@ -17,6 +18,23 @@ logger = logging.getLogger(__name__)
 
 DETECTION_STALE_S = 90
 SENSOR_STALE_S = 300
+COT_MIN_INTERVAL_S = 5.0       # contract C4.4: at most one CoT per 5 s per uid
+
+# Contract C4.3: remarks of synthetic / replayed output start with these. Live mic: no prefix.
+_REMARK_PREFIX = {"simulate": "SIMULATED: ", "file": "RECORDED: "}
+
+
+def remarks_prefix(source_kind: str | None) -> str:
+    return _REMARK_PREFIX.get(source_kind or "", "")
+
+
+def valid_position(lat, lon) -> bool:
+    """Contract C4.2: never draw a point at 0,0 (an unset position) or out of range."""
+    if lat is None or lon is None:
+        return False
+    if lat == 0 and lon == 0:
+        return False
+    return -90 <= lat <= 90 and -180 <= lon <= 180
 
 
 def isotime(ts: float) -> str:
@@ -44,30 +62,38 @@ def detection_event(sensor_name: str, lat: float, lon: float, hae: float, confid
     """UAV marker placed at the sensor (acoustics gives presence, not position). ce = rough range."""
     uid = f"ACOUSTIC-{sensor_name}-UAV"
     cot_type = f"a-{affiliation}-A-M-F-Q"        # air / military / fixed... -Q = UAV/drone
-    remarks = (
+    remarks = remarks_prefix(source) + (
         f"ACOUSTIC drone detection by sensor {sensor_name}. conf {confidence:.2f}. "
         f"Marker is the SENSOR position: target is within ~{radius_m:.0f} m, bearing unknown."
     )
     if f0_hz:
         remarks += f" Prop tone ~{f0_hz:.0f} Hz."
     if source:
-        remarks += f" Input: {source}."
+        remarks += f" Input: {'live microphone' if source == 'mic' else source}."
     # how="m-f": machine-derived/fused rather than a measured target position.
     return build_event(uid, cot_type, lat, lon, hae, f"UAV? (acoustic {sensor_name})", remarks,
                        DETECTION_STALE_S, ce=radius_m, how="m-f", now=now)
 
 
 def sensor_event(sensor_name: str, lat: float, lon: float, hae: float, status: str,
-                 now: float | None = None) -> str:
+                 source: str = "", now: float | None = None) -> str:
     uid = f"ACOUSTIC-{sensor_name}"
-    remarks = f"Acoustic drone sensor {sensor_name}: {status}"
+    remarks = remarks_prefix(source) + f"Acoustic drone sensor {sensor_name}: {status}"
     return build_event(uid, "a-f-G-E-S", lat, lon, hae, f"ACOUSTIC {sensor_name}", remarks,
                        SENSOR_STALE_S, ce=5.0, how="h-e", now=now)
 
 
+_UID_RE = re.compile(r"""<event\b[^>]*\buid=(["'])(.*?)\1""")
+
+
 class CotClient:
-    def __init__(self, host: str, port: int, max_backoff: float = 30.0):
+    def __init__(self, host: str, port: int, max_backoff: float = 30.0,
+                 min_interval_s: float = COT_MIN_INTERVAL_S, clock=time.monotonic):
         self.host, self.port = host, port
+        self.min_interval_s = min_interval_s
+        self._clock = clock
+        self._last_by_uid: dict[str, float] = {}
+        self.throttled = 0
         self.max_backoff = max_backoff
         self.connected = False
         self.sent = 0
@@ -82,7 +108,21 @@ class CotClient:
     def stop(self):
         self._stop.set()
 
-    def send(self, xml: str):
+    def send(self, xml: str) -> bool:
+        """Queue a CoT event. Returns False if the per-uid rate limit dropped it."""
+        m = _UID_RE.search(xml)
+        if m and self.min_interval_s > 0:
+            uid, now = m.group(2), self._clock()
+            last = self._last_by_uid.get(uid)
+            if last is not None and now - last < self.min_interval_s:
+                self.throttled += 1
+                logger.debug("CoT rate limit for %s; dropped", uid)
+                return False
+            self._last_by_uid[uid] = now
+        self._enqueue(xml)
+        return True
+
+    def _enqueue(self, xml: str):
         try:
             self._q.put_nowait(xml)
         except queue.Full:

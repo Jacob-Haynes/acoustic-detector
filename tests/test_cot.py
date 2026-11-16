@@ -75,3 +75,38 @@ def test_client_delivers_and_reconnects():
     srv.close()
     c.stop()
     assert received and "ACOUSTIC-OP1" in received[0]
+
+
+def test_remarks_prefix_c43():
+    sim = ET.fromstring(cot.detection_event("OP1", 51.1, -1.7, 0, 0.8, 300, source="simulate").encode())
+    assert sim.find("detail/remarks").text.startswith("SIMULATED: ")
+    rec = ET.fromstring(cot.detection_event("OP1", 51.1, -1.7, 0, 0.8, 300, source="file").encode())
+    assert rec.find("detail/remarks").text.startswith("RECORDED: ")
+    live = ET.fromstring(cot.detection_event("OP1", 51.1, -1.7, 0, 0.8, 300, source="mic").encode())
+    assert live.find("detail/remarks").text.startswith("ACOUSTIC drone detection")
+    marker = ET.fromstring(cot.sensor_event("OP1", 51.1, -1.7, 0, "listening", source="simulate").encode())
+    assert marker.find("detail/remarks").text.startswith("SIMULATED: ")
+    assert ET.fromstring(cot.sensor_event("OP1", 1, 2, 3, "x").encode()).find("detail/remarks").text.startswith("Acoustic")
+
+
+def test_valid_position_c42():
+    assert not cot.valid_position(None, None)
+    assert not cot.valid_position(0.0, 0.0)
+    assert not cot.valid_position(95.0, 1.0)
+    assert cot.valid_position(51.15, -1.75)
+    assert cot.valid_position(0.0, -1.75)          # equator is a real place
+
+
+def test_cot_rate_limit_per_uid_c44():
+    t = [0.0]
+    c = cot.CotClient("127.0.0.1", 1, clock=lambda: t[0])       # not started: just queues
+    det = cot.detection_event("OP1", 51.1, -1.7, 0, 0.8, 300)
+    marker = cot.sensor_event("OP1", 51.1, -1.7, 0, "listening")
+    assert c.send(det)
+    assert c.send(marker)                  # different uid: allowed
+    t[0] = 4.9
+    assert not c.send(det)
+    assert not c.send(marker)
+    t[0] = 5.1
+    assert c.send(det)
+    assert c.throttled == 2 and c._q.qsize() == 3

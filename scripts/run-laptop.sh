@@ -6,7 +6,7 @@
 #
 #   ACOUSTIC_INPUT  mic (default) | simulate | /path/to/clip.(wav|mp3|mp4|mov)
 #   AUDIO_DEVICE    input index or name (see: scripts/run-laptop.sh --list-devices)
-#   TAK_HOST/TAK_PORT, MQTT_HOST/MQTT_PORT/MQTT_USER/MQTT_PASS, SENSOR_NAME/SENSOR_LAT/SENSOR_LON
+#   TAK_HOST/TAK_PORT, MQTT_HOST/MQTT_PORT/MQTT_USER/MQTT_PASS, SENSOR_NAME/SENSOR_LAT/SENSOR_LON, ISR_HOST
 set -euo pipefail
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO"

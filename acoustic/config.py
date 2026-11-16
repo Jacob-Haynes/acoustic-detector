@@ -153,4 +153,6 @@ class Settings:
 
     @property
     def has_position(self) -> bool:
-        return self.sensor_lat is not None and self.sensor_lon is not None
+        from acoustic.cot import valid_position
+
+        return valid_position(self.sensor_lat, self.sensor_lon)     # unset or 0,0: no markers

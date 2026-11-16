@@ -35,12 +35,19 @@ On a detection:
 - **Mesh**: `{"text": "ACOUSTIC: drone detected conf 0.87 @ OP1", "to": null, "channel": 0,
   "source": "acoustic-detector"}` published to `meshbus/tx` on 127.0.0.1:1883. The mesh bridge owns
   the radio, and this tool never opens the serial port.
+- **Labelling**: in `--simulate` the CoT remarks (detection and sensor marker) start with
+  `SIMULATED: ` and mesh texts start with `[SIM] `; in `--file` replay they start with `RECORDED: `
+  and `[REC] `. Live microphone input has no prefix. That includes the office demo, where drone
+  audio played through a speaker is a real acoustic detection.
+- **Rate limits**: at most one mesh text per 30 s, and at most one CoT event per 5 s per uid.
+  Anything over is dropped and logged.
 - **Gemini** (if enabled): the last 4 s are sent for a second opinion, which is shown in its own panel.
 - Each event is appended to `/var/lib/acoustic-detector/detections.jsonl`.
 
 Every 10 s a retained heartbeat goes to `isrkit/heartbeat/acoustic-detector`
 (`{"tool","host","url","mode","status","ts"}`, where mode is `cpu`, `gemini`, `simulate` or
-`replay`, and status is `ok`, `degraded` or `error`). A clean exit leaves `stopped`. A crash
+`replay`, and status is `ok`, `degraded` or `error`). `host` is `ISR_HOST` if set, otherwise
+the lowercased short hostname. A clean exit leaves `stopped`. A crash
 leaves `error` through the MQTT last-will. The Pi launcher uses this to list the tool wherever
 it runs.
 
@@ -347,7 +354,8 @@ key isn't set, the UI shows **OFFLINE** and nothing leaves the Pi.
 
 All settings live in `/etc/acoustic-detector.env`. See
 [`deploy/acoustic-detector.env.example`](deploy/acoustic-detector.env.example). The most important
-ones are `SENSOR_NAME`, `SENSOR_LAT`/`SENSOR_LON` (without them no ATAK markers are sent),
+ones are `SENSOR_NAME`, `SENSOR_LAT`/`SENSOR_LON` (the shared OP position; without them, or
+at 0,0, no ATAK markers are sent; `--simulate` alone falls back to a demo position), `ISR_HOST`,
 `DETECT_ON`/`DETECT_OFF`/`ALERT_COOLDOWN`, `TAK_HOST`/`TAK_PORT`, `MQTT_*` and `MESH_TO`.
 
 ## Layout

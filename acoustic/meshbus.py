@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import socket
 import threading
 import time
@@ -22,6 +23,7 @@ TX_TOPIC = "meshbus/tx"
 HEARTBEAT_TOPIC = "isrkit/heartbeat/acoustic-detector"
 HEARTBEAT_EVERY_S = 10.0
 MAX_TEXT = 200
+MESH_MIN_INTERVAL_S = 30.0    # contract C4.4: at most one mesh text per 30 s per tool
 SOURCE = "acoustic-detector"
 
 
@@ -40,6 +42,20 @@ def short_hostname() -> str:
     return socket.gethostname().split(".")[0]
 
 
+def station_host() -> str:
+    """Contract C4.1: env ISR_HOST if set, else the lowercased short hostname."""
+    return os.environ.get("ISR_HOST", "").strip() or short_hostname().lower()
+
+
+# Contract C4.3: synthetic or replayed input is labelled everywhere it leaves the box.
+# Live microphone input (including drone audio played through a speaker) carries no tag.
+_MESH_TAGS = {"simulate": "[SIM] ", "file": "[REC] "}
+
+
+def mesh_tag(source_kind: str | None) -> str:
+    return _MESH_TAGS.get(source_kind or "", "")
+
+
 def heartbeat_payload(host: str, url: str, mode: str, status: str, ts: float | None = None) -> dict:
     """isrkit heartbeat contract: {"tool","host","url","mode","status","ts"}."""
     return {"tool": SOURCE, "host": host, "url": url, "mode": mode, "status": status,
@@ -48,21 +64,30 @@ def heartbeat_payload(host: str, url: str, mode: str, status: str, ts: float | N
 
 def advertised_url(port: int, public_url: str | None = None) -> str:
     """PUBLIC_URL if set, else http://<short-hostname>.local:<port> (e.g. isr-pi.local)."""
-    return public_url or f"http://{short_hostname()}.local:{port}"
+    return public_url or f"http://{station_host()}.local:{port}"
 
 
-def alert_text(confidence: float, sensor_name: str) -> str:
-    return f"ACOUSTIC: drone detected conf {confidence:.2f} @ {sensor_name}"
+def alert_text(confidence: float, sensor_name: str, source_kind: str | None = None) -> str:
+    return f"{mesh_tag(source_kind)}ACOUSTIC: drone detected conf {confidence:.2f} @ {sensor_name}"
 
 
-def clear_text(sensor_name: str, peak: float) -> str:
-    return f"ACOUSTIC: clear @ {sensor_name} (peak {peak:.2f})"
+def clear_text(sensor_name: str, peak: float, source_kind: str | None = None) -> str:
+    return f"{mesh_tag(source_kind)}ACOUSTIC: clear @ {sensor_name} (peak {peak:.2f})"
+
+
+def test_text(sensor_name: str, source_kind: str | None = None) -> str:
+    return f"{mesh_tag(source_kind)}ACOUSTIC: TEST alert @ {sensor_name} (not a detection)"
 
 
 class MeshBus:
     def __init__(self, host: str, port: int, user: str, password: str,
-                 to: str | None = None, channel: int = 0):
+                 to: str | None = None, channel: int = 0,
+                 min_interval_s: float = MESH_MIN_INTERVAL_S, clock: Callable[[], float] = time.monotonic):
         self.host, self.port = host, port
+        self.min_interval_s = min_interval_s
+        self._clock = clock
+        self._last_sent: float | None = None
+        self.throttled = 0
         self.to, self.channel = to, channel
         self.connected = False
         self.sent = 0
@@ -74,7 +99,7 @@ class MeshBus:
             self._client.username_pw_set(user, password)
             # Unclean exit (crash, power loss): broker publishes a retained "error" heartbeat.
             self._client.will_set(HEARTBEAT_TOPIC, json.dumps(
-                heartbeat_payload(short_hostname(), "", "cpu", "error")), qos=1, retain=True)
+                heartbeat_payload(station_host(), "", "cpu", "error")), qos=1, retain=True)
             self._client.on_connect = self._on_connect
             self._client.on_disconnect = self._on_disconnect
             self._client.reconnect_delay_set(min_delay=1, max_delay=30)
@@ -147,6 +172,11 @@ class MeshBus:
 
     def send(self, text: str) -> bool:
         payload = build_payload(text, self.to, self.channel)
+        now = self._clock()
+        if self._last_sent is not None and now - self._last_sent < self.min_interval_s:
+            self.throttled += 1
+            logger.warning("Mesh rate limit (1 per %.0f s); not sent: %s", self.min_interval_s, payload["text"])
+            return False
         if self._client is None or not self.connected:
             logger.warning("MQTT broker not connected; mesh alert not sent: %s", payload["text"])
             return False
@@ -158,5 +188,6 @@ class MeshBus:
             return False
         if ok:
             self.sent += 1
+            self._last_sent = now
             logger.info("Mesh alert sent: %s", payload["text"])
         return ok

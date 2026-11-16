@@ -31,11 +31,26 @@ def test_simulated_drone_pass_alerts_once(settings):
 
 
 def test_no_position_means_no_cot(settings):
-    settings.sensor_lat = settings.sensor_lon = None
-    cot = FakeCot()
-    e = Engine(settings, cot_client=cot, mesh=FakeMesh())
-    run_sim(e, 40)
-    assert cot.messages == []
+    for lat, lon in ((None, None), (0.0, 0.0)):        # C4.2: unset or 0,0 never drawn
+        settings.sensor_lat, settings.sensor_lon = lat, lon
+        cot = FakeCot()
+        e = Engine(settings, cot_client=cot, mesh=FakeMesh())
+        run_sim(e, 40)
+        assert cot.messages == []
+
+
+def test_simulated_outputs_are_labelled_c43(settings):
+    from acoustic.sources import SimSource
+    import xml.etree.ElementTree as ET
+
+    cot, mesh = FakeCot(), FakeMesh()
+    e = Engine(settings, cot_client=cot, mesh=mesh, source=SimSource())   # not started: we feed it
+    run_sim(e, sum(d for _, d in SCENARIO))
+    assert mesh.texts and all(t.startswith("[SIM] ACOUSTIC: ") for t in mesh.texts)
+    remarks = [ET.fromstring(m.encode()).find("detail/remarks").text for m in cot.messages]
+    assert remarks and all(r.startswith("SIMULATED: ") for r in remarks)
+    assert any("Acoustic drone sensor" in r for r in remarks)               # sensor marker too
+    assert e.test_alert()["mesh_sent"] and mesh.texts[-1].startswith("[SIM] ACOUSTIC: TEST")
 
 
 def test_ring_buffer_and_waterfall(settings):
