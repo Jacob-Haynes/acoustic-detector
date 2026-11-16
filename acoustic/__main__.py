@@ -68,7 +68,13 @@ def main(argv=None):
 
     from acoustic.yamnet import Yamnet
 
-    yamnet = Yamnet(s.yamnet_model) if s.use_yamnet else None
+    yamnet = None
+    if s.use_yamnet:
+        try:
+            yamnet = Yamnet(s.yamnet_model, s.yamnet_class_map)    # degrades itself, never raises
+        except Exception as e:  # noqa: BLE001 - belt and braces: a classifier must not stop the sensor
+            log.warning("YAMNet unavailable (%s); prop-comb detection only", e)
+            yamnet = None
 
     if args.enroll or args.enroll_background:
         from acoustic.calibration import Calibration

@@ -100,6 +100,7 @@ class Settings:
     data_dir: Path = field(default_factory=_default_data_dir)
     yamnet_model: Path = field(default_factory=_default_model_path)
     use_yamnet: bool = True
+    yamnet_class_map: Path | None = None   # default: the CSV shipped in acoustic/data/
 
     detect_on: float = 0.65
     detect_off: float = 0.40
@@ -144,6 +145,8 @@ class Settings:
         if _env("YAMNET_MODEL"):
             s.yamnet_model = Path(_env("YAMNET_MODEL"))
         s.use_yamnet = _env_bool("USE_YAMNET", s.use_yamnet)
+        if _env("YAMNET_CLASS_MAP"):
+            s.yamnet_class_map = Path(_env("YAMNET_CLASS_MAP"))
         s.on_frames = max(1, _env_int("DETECT_ON_FRAMES", s.on_frames))
         s.off_frames = max(1, _env_int("DETECT_OFF_FRAMES", s.off_frames))
         s.detect_on = _env_float("DETECT_ON", s.detect_on)

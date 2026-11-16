@@ -109,11 +109,25 @@ needs no drivers on Pi OS or macOS.
 
 ## Install (Pi)
 
+**The Pi has no internet once it is the hotspot.** Fetch the model assets while you are still
+online, on the Pi or on the laptop you copy the repo from:
+
 ```bash
-git clone <this repo> && cd acoustic-detector
-sudo bash deploy/install.sh
+bash scripts/prefetch.sh     # YAMNet model -> models/yamnet.tflite; checks the class map
+```
+
+`acoustic/data/yamnet_class_map.csv` is committed (Apache 2.0, from Google's YAMNet). The model
+file (~4 MB) isn't, so copy the repo's `models/` directory along with the code. Then on the Pi:
+
+```bash
+git clone <this repo> && cd acoustic-detector    # or the copy you brought over
+sudo bash deploy/install.sh                      # add --skip-apt when offline
 sudo nano /etc/acoustic-detector.env     # set SENSOR_NAME, SENSOR_LAT, SENSOR_LON
 ```
+
+If YAMNet can't run (no LiteRT wheel, no model, no class map), the sensor **still starts** and runs
+prop-comb detection only. It logs one warning, the UI's model chip says *YAMNet unavailable
+(offline install?)*, and the heartbeat is `degraded` with that text in `detail`.
 
 The install script is idempotent and non-interactive. It installs apt packages, creates an
 `acoustic` service user in the `audio` group, puts the code in `/opt/acoustic-detector` with a venv,
@@ -197,7 +211,7 @@ range than with the USB mic, and enrol a fresh background clip on that laptop.
 
 ```bash
 uv venv -p 3.11 .venv && uv pip install -p .venv/bin/python -r requirements-dev.txt
-scripts/fetch_model.sh                    # optional: YAMNet
+scripts/prefetch.sh                       # YAMNet model + class map (run while online)
 .venv/bin/python -m acoustic --simulate   # http://localhost:8100
 .venv/bin/python -m pytest
 ```

@@ -16,6 +16,7 @@ from acoustic import cot, dsp, meshbus
 from acoustic.calibration import Calibration
 from acoustic.config import SAMPLE_RATE, WINDOW_SAMPLES, Settings
 from acoustic.detector import Hysteresis, fuse
+from acoustic.yamnet import UNAVAILABLE
 
 logger = logging.getLogger(__name__)
 
@@ -336,18 +337,30 @@ class Engine:
             mode = "gemini"
         else:
             mode = "cpu"
-        status = "ok"
+        status, notes = "ok", []
         if getattr(self.source, "error", None) or (kind == "none"):
             status = "error"                      # no working audio input
+            notes.append("no audio input")
         elif getattr(self.source, "finished", False):
             status = "degraded"                   # file replay ended
-        elif (self.cot is not None and self.s.has_position and not self.cot.connected
-              and time.time() - self._started > 30):
-            status = "degraded"                   # TAK unreachable
-        elif self.yamnet is not None and not self.yamnet.available and self.s.use_yamnet:
-            status = "degraded"                   # running spectral-only
-        return {"host": meshbus.station_host(), "url": meshbus.advertised_url(self.s.web_port, self.s.public_url),
-                "mode": mode, "status": status}
+            notes.append("replay finished")
+        if (self.cot is not None and self.s.has_position and not self.cot.connected
+                and time.time() - self._started > 30):
+            status = "degraded" if status == "ok" else status
+            notes.append("TAK unreachable")
+        if self.yamnet_unavailable:
+            status = "degraded" if status == "ok" else status
+            notes.append(UNAVAILABLE)             # prop-comb detection only
+        hb = {"host": meshbus.station_host(), "url": meshbus.advertised_url(self.s.web_port, self.s.public_url),
+              "mode": mode, "status": status}
+        if notes:
+            hb["detail"] = "; ".join(notes)
+        return hb
+
+    @property
+    def yamnet_unavailable(self) -> bool:
+        """YAMNet was wanted (not --no-yamnet) but its runtime, model or class map is missing."""
+        return self.s.use_yamnet and (self.yamnet is None or not self.yamnet.available)
 
     def start(self):
         threading.Thread(target=self._analysis_loop, name="analysis", daemon=True).start()
@@ -373,6 +386,7 @@ class Engine:
             "detector": {
                 "yamnet": bool(self.yamnet is not None and self.yamnet.available),
                 "yamnet_reason": "" if self.yamnet is None else getattr(self.yamnet, "reason", ""),
+                "yamnet_unavailable": self.yamnet_unavailable,
                 "on": self.s.detect_on, "off": self.s.detect_off, "cooldown_s": self.s.alert_cooldown_s,
             },
             "calibration": self.calibration.status(),

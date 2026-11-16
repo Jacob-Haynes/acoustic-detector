@@ -1,8 +1,18 @@
 #!/usr/bin/env bash
 # Install acoustic-detector on the Pi. Idempotent, non-interactive. Does NOT enable at boot:
 # pi-profiles starts/stops it.
-# Usage: sudo bash deploy/install.sh
+# Usage: sudo bash deploy/install.sh [--skip-apt]
+#   --skip-apt  don't touch apt (offline Pi: packages already present)
+# Offline Pi: run scripts/prefetch.sh on a machine with internet first, then copy the repo over.
 set -euo pipefail
+
+SKIP_APT=0
+for arg in "$@"; do
+    case "$arg" in
+        --skip-apt) SKIP_APT=1 ;;
+        *) echo "Unknown option: $arg" >&2; exit 2 ;;
+    esac
+done
 
 APP=acoustic-detector
 APP_DIR=/opt/$APP
@@ -20,9 +30,13 @@ fi
 echo "=== $APP: Pi install ==="
 
 echo "[1/7] System packages"
-export DEBIAN_FRONTEND=noninteractive
-apt-get update -qq
-apt-get install -y -qq python3 python3-venv python3-pip libportaudio2 libsndfile1 alsa-utils curl rsync
+if [ "$SKIP_APT" -eq 1 ]; then
+    echo "      skipped (--skip-apt)"
+else
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get update -qq
+    apt-get install -y -qq python3 python3-venv python3-pip libportaudio2 libsndfile1 alsa-utils curl rsync
+fi
 
 echo "[2/7] Service user '$SVC_USER' (in group audio)"
 if ! id -u "$SVC_USER" >/dev/null 2>&1; then
@@ -33,10 +47,14 @@ fi
 
 echo "[3/7] Copying code to $APP_DIR"
 mkdir -p "$APP_DIR/models"
+# Anchored excludes: a bare 'data' would also drop acoustic/data/ (the YAMNet class map).
 rsync -a --delete \
-    --exclude '.git' --exclude '.venv' --exclude 'data' --exclude 'models' \
+    --exclude '/.git' --exclude '/.venv' --exclude '/data' --exclude '/models' \
     --exclude '__pycache__' --exclude '.pytest_cache' \
     "$SRC_DIR/" "$APP_DIR/"
+if [ ! -s "$APP_DIR/acoustic/data/yamnet_class_map.csv" ]; then
+    echo "WARNING: acoustic/data/yamnet_class_map.csv missing; YAMNet will be disabled (prop-comb only)."
+fi
 chmod +x "$APP_DIR/deploy/start.sh" "$APP_DIR/scripts/"*.sh
 
 echo "[4/7] Python venv"
@@ -51,12 +69,13 @@ echo "[5/7] YAMNet model"
 if [ ! -s "$APP_DIR/models/yamnet.tflite" ]; then
     if [ -s "$SRC_DIR/models/yamnet.tflite" ]; then
         cp "$SRC_DIR/models/yamnet.tflite" "$APP_DIR/models/yamnet.tflite"
-    elif curl -fsSL --retry 3 -o "$APP_DIR/models/yamnet.tflite.part" "$MODEL_URL"; then
+    elif [ "$SKIP_APT" -eq 0 ] && command -v curl >/dev/null && curl -fsSL --retry 3 -o "$APP_DIR/models/yamnet.tflite.part" "$MODEL_URL"; then
         mv "$APP_DIR/models/yamnet.tflite.part" "$APP_DIR/models/yamnet.tflite"
     else
         rm -f "$APP_DIR/models/yamnet.tflite.part"
-        echo "WARNING: could not download YAMNet (offline?). Re-run install with internet, or copy"
-        echo "         yamnet.tflite to $APP_DIR/models/. Spectral detection works without it."
+        echo "WARNING: could not download YAMNet (offline?). Run scripts/prefetch.sh on a machine"
+        echo "         with internet and re-copy the repo, or copy yamnet.tflite to $APP_DIR/models/."
+        echo "         The sensor still runs, with prop-comb (spectral) detection only."
     fi
 fi
 

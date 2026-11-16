@@ -43,7 +43,7 @@ if [ ! -x "$PY" ]; then
         "$PY" -m pip install -q -r requirements-ml.txt || echo "WARNING: LiteRT not installed; spectral-only"
     fi
 fi
-[ -s models/yamnet.tflite ] || bash scripts/fetch_model.sh || echo "WARNING: no YAMNet model (offline?); spectral-only"
+bash scripts/prefetch.sh || echo "WARNING: YAMNet assets missing (offline?); prop-comb only"
 
 if [ "${1:-}" = "--list-devices" ]; then
     exec "$PY" -m acoustic --list-devices

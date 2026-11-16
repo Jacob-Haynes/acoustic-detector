@@ -35,7 +35,7 @@ def test_score_mapping():
     assert r.score == 0.0 and r.confuser > 0.9
 
 
-@pytest.mark.skipif(not MODEL.exists(), reason="run scripts/fetch_model.sh to test the real model")
+@pytest.mark.skipif(not MODEL.exists(), reason="run scripts/prefetch.sh to test the real model")
 def test_real_model_runs():
     pytest.importorskip("ai_edge_litert")
     y = Yamnet(MODEL)

@@ -95,27 +95,42 @@ def _load_interpreter(model_path: Path):
         return None, f"failed to load {model_path}: {e}"
 
 
+UNAVAILABLE = "YAMNet unavailable (offline install?)"
+
+
 class Yamnet:
-    def __init__(self, model_path: Path):
+    """Never raises: if the runtime, model or class map is missing, ``available`` is False,
+    ``reason`` says why, and the detector runs prop-comb (spectral) only."""
+
+    def __init__(self, model_path: Path, class_map: Path | None = None):
         self.available = False
         self.reason = ""
         self._lock = threading.Lock()   # the interpreter is not thread-safe
-        self.class_names = load_class_names()
-        self._drone_idx = {self.class_names.index(n): w for n, w in DRONE_CLASSES.items()}
-        self._conf_idx = [self.class_names.index(n) for n in CONFUSER_CLASSES]
+        self.class_names: list[str] = []
+        class_map = Path(class_map) if class_map else CLASS_MAP
+        try:
+            self.class_names = load_class_names(class_map)
+            self._drone_idx = {self.class_names.index(n): w for n, w in DRONE_CLASSES.items()}
+            self._conf_idx = [self.class_names.index(n) for n in CONFUSER_CLASSES]
+        except (OSError, ValueError, KeyError, csv.Error) as e:
+            self._disable(f"class map unusable at {class_map} ({e.__class__.__name__}); "
+                          "run scripts/prefetch.sh while online")
+            return
         if not Path(model_path).exists():
-            self.reason = f"model not found at {model_path} (run scripts/fetch_model.sh)"
-            logger.warning("YAMNet disabled: %s", self.reason)
+            self._disable(f"model not found at {model_path}; run scripts/prefetch.sh while online")
             return
         self._interp, err = _load_interpreter(Path(model_path))
         if self._interp is None:
-            self.reason = err or "unknown"
-            logger.warning("YAMNet disabled: %s", self.reason)
+            self._disable(err or "unknown error")
             return
         self._in = self._interp.get_input_details()[0]["index"]
         self._out = self._interp.get_output_details()[0]["index"]
         self.available = True
         logger.info("YAMNet loaded from %s", model_path)
+
+    def _disable(self, why: str):
+        self.reason = why
+        logger.warning("%s: %s. Running prop-comb (spectral) detection only.", UNAVAILABLE, why)
 
     def classify(self, window: np.ndarray) -> YamnetResult | None:
         if not self.available:

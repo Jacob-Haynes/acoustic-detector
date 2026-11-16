@@ -294,7 +294,9 @@ function renderStatus(s) {
   chip("c-source", "Input", src.kind === "simulate" ? "SIMULATED" : src.kind === "file" ? "FILE" + (src.finished ? " (ended)" : "") : "MIC",
        src.kind === "mic" ? "ok" : "");
   $("c-source").title = src.description;
-  chip("c-model", "On-device", s.detector.yamnet ? "YAMNet + spectral" : "spectral only", s.detector.yamnet ? "ok" : "");
+  chip("c-model", "On-device", s.detector.yamnet ? "YAMNet + spectral"
+       : s.detector.yamnet_unavailable ? "YAMNet unavailable (offline install?)" : "spectral only",
+       s.detector.yamnet ? "ok" : s.detector.yamnet_unavailable ? "bad" : "");
   $("c-model").title = s.detector.yamnet_reason || "YAMNet (AudioSet) on CPU via LiteRT";
   const cal = s.calibration;
   chip("c-cal", "Calibration", cal.enrolled ? `${cal.counts.drone} drone / ${cal.counts.background} bg` : "none", cal.enrolled ? "ok" : "");
