@@ -388,6 +388,7 @@ class Engine:
                 "yamnet_reason": "" if self.yamnet is None else getattr(self.yamnet, "reason", ""),
                 "yamnet_unavailable": self.yamnet_unavailable,
                 "on": self.s.detect_on, "off": self.s.detect_off, "cooldown_s": self.s.alert_cooldown_s,
+                "affiliation": self.s.cot_affiliation,
             },
             "calibration": self.calibration.status(),
             "gemini": self.gemini.status() if self.gemini is not None else {"enabled": False, "reason": "not configured"},

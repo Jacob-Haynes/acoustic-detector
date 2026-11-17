@@ -7,31 +7,27 @@
 <link rel="stylesheet" href="isr-ui.css">
 <script src="isr-ui.js"></script>
 <style>
-  /* Layout specific to this tool only; colours, type and controls come from isr-ui.css. */
+  /* Layout specific to this tool only; colours, type and controls come from isr-ui.css (kit v2). */
   .layout { display: grid; grid-template-columns: 380px 1fr; gap: var(--gap); align-items: start; }
   .col { display: grid; gap: var(--gap); }
   @media (max-width: 900px) { .layout { grid-template-columns: 1fr; } }
   .head { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
-  #verdict { font-size: 30px; font-weight: 700; margin: 4px 0 2px; }
-  #verdict.bad { color: var(--bad); } #verdict.warn { color: var(--warn); } #verdict.ok { color: var(--ok); }
-  .meter { position: relative; height: 14px; margin: 12px 0 6px; background: var(--panel-2);
-           border: 1px solid var(--line); border-radius: 999px; overflow: hidden; }
-  .meter .fill { position: absolute; inset: 0 auto 0 0; width: 0; background: var(--accent); transition: width .25s; }
-  .meter .tick { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--muted); }
+  #verdict { font: 500 30px/1.1 var(--label); margin: 4px 0 6px; }
+  .meter { position: relative; height: 8px; margin: 12px 0 6px; background: var(--panel-2); border: 1px solid var(--line); }
+  .meter .fill { position: absolute; inset: 0 auto 0 0; width: 0; background: var(--muted); transition: width .25s; }
+  .isr-card.alert .meter .fill { background: var(--accent); }
+  .meter .tick { position: absolute; top: -1px; bottom: -1px; width: 1px; background: var(--text); }
   .btns { display: flex; flex-wrap: wrap; gap: 10px; }
-  .progress { height: 4px; margin-top: 10px; background: var(--panel-2); border-radius: 2px; overflow: hidden; }
-  .progress div { height: 100%; width: 0; background: var(--bad); }
-  canvas { display: block; width: 100%; background: #000; border-radius: 6px; }
+  .progress { height: 2px; margin-top: 10px; background: var(--panel-2); overflow: hidden; }
+  .progress div { height: 100%; width: 0; background: var(--accent); }
+  canvas { display: block; width: 100%; background: var(--bg); }
   #wfwrap { position: relative; }
-  #faxis { position: absolute; left: 6px; top: 0; bottom: 0; pointer-events: none; font-size: 12px; color: #cfd8e3; }
-  #faxis div { position: absolute; transform: translateY(-50%); white-space: nowrap; text-shadow: 0 0 3px #000; }
-  #log li .t { color: var(--muted); min-width: 92px; }
-  #log li .w { font-weight: 600; min-width: 120px; }
-  #log li .w.bad { color: var(--bad); } #log li .w.warn { color: var(--warn); } #log li .w.ok { color: var(--ok); }
+  #faxis { position: absolute; left: 6px; top: 0; bottom: 0; pointer-events: none; font: 400 12px/1 var(--mono); color: var(--text); }
+  #faxis div { position: absolute; transform: translateY(-50%); white-space: nowrap; text-shadow: 0 0 3px var(--bg); }
+  #log li .w { min-width: 130px; }
   .kv { display: grid; grid-template-columns: max-content 1fr; gap: 4px 14px; margin: 8px 0 12px; }
-  .kv > :nth-child(odd) { color: var(--muted); }
   .kv > :nth-child(even) { color: var(--text); }
-  details.isr-more h3 { margin: 14px 0 6px; font-size: 14px; color: var(--text); }
+  details.isr-more h3 { margin: 14px 0 6px; font: 500 15px/1.2 var(--label); color: var(--text); }
   details.isr-more .btns { margin: 6px 0; }
   select { max-width: 100%; }
 </style>
@@ -50,9 +46,9 @@
   <div class="isr-banner bad" id="banner" hidden></div>
   <div class="layout">
     <div class="col">
-      <section class="isr-card">
-        <div class="head"><h2>Now</h2><span class="isr-tag" id="srctag">…</span></div>
-        <div id="verdict" class="ok">Quiet</div>
+      <section class="isr-card" id="now">
+        <div class="head"><h2>Now</h2><span class="isr-tag" id="srctag"></span></div>
+        <div id="verdict">Quiet</div>
         <div class="isr-big" id="conf">0%</div>
         <div class="meter"><div class="fill" id="fill"></div><div class="tick" id="tick-on"></div></div>
         <div class="isr-muted" id="tone">No rotor tone</div>
@@ -60,7 +56,7 @@
 
       <section class="isr-card">
         <h2>Teach it your drone</h2>
-        <p class="isr-muted" id="calinfo">Fly the drone 5 to 30 m from the mic, then record.</p>
+        <p class="isr-muted" id="calinfo">Fly the drone 5 to 30 metres from the mic, then record.</p>
         <div class="btns">
           <button class="isr-btn primary" id="rec-drone">Record drone</button>
           <button class="isr-btn" id="rec-bg">Record background</button>
@@ -70,7 +66,7 @@
 
       <section class="isr-card" id="gemini" hidden>
         <h2>Cloud second opinion</h2>
-        <div class="head"><span id="gem-verdict" class="isr-big" style="font-size:24px">–</span>
+        <div class="head"><span id="gem-verdict" class="isr-big">–</span>
           <button class="isr-btn" id="gem-ask">Ask Gemini</button></div>
         <p class="isr-muted" id="gem-detail">Sends the last 4 s of audio to Google.</p>
       </section>
@@ -174,18 +170,24 @@ const hist = $("hist"), hctx = hist.getContext("2d");
 function drawHistory(h) {
   sizeCanvas(hist);
   const W = hist.width, H = hist.height;
-  hctx.fillStyle = "#000"; hctx.fillRect(0, 0, W, H);
-  hctx.strokeStyle = "#8b97a6"; hctx.setLineDash([4, 4]); hctx.beginPath();
+  hctx.fillStyle = cssVar("--bg"); hctx.fillRect(0, 0, W, H);
+  hctx.strokeStyle = cssVar("--muted"); hctx.setLineDash([4, 4]); hctx.beginPath();
   hctx.moveTo(0, H - thresholds.on * H); hctx.lineTo(W, H - thresholds.on * H); hctx.stroke();
   hctx.setLineDash([]);
   if (!h || h.length < 2) return;
-  hctx.strokeStyle = "#4ea1ff"; hctx.lineWidth = 2 * devicePixelRatio; hctx.beginPath();
+  hctx.strokeStyle = cssVar("--text"); hctx.lineWidth = 2 * devicePixelRatio; hctx.beginPath();
   h.forEach((v, i) => { const x = W - (h.length - 1 - i) * (W / 119); const y = H - v * H; i ? hctx.lineTo(x, y) : hctx.moveTo(x, y); });
   hctx.stroke(); hctx.lineWidth = 1;
 }
 
 // ---------- rendering ----------
-function fmtTime(ts) { return new Date(ts * 1000).toLocaleTimeString(); }
+function fmtTime(ts) {   // Zulu, to match the DTG in the header: 14:03:27Z
+  const d = new Date(ts * 1000), p = (n) => String(n).padStart(2, "0");
+  return `${p(d.getUTCHours())}:${p(d.getUTCMinutes())}:${p(d.getUTCSeconds())}Z`;
+}
+// The TAK marker's affiliation (COT_AFFILIATION): u = unknown, h = hostile, s = suspect (shown as hostile).
+function affClass() { const a = lastStatus && lastStatus.detector.affiliation; return a === "h" || a === "s" ? "hostile" : "unknown"; }
+function cssVar(name) { return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
 function esc(s) { return String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c])); }
 function pct(v) { return Math.round((v || 0) * 100) + "%"; }
 function kv(el, rows) { $(el).innerHTML = rows.map(([k, v]) => `<span>${k}</span><span>${v}</span>`).join(""); }
@@ -194,11 +196,11 @@ function renderState(st) {
   if (!st) return;
   const c = st.confidence || 0;
   const level = st.active ? "bad" : c >= thresholds.off ? "warn" : "ok";
-  $("verdict").className = level;
-  $("verdict").textContent = st.active ? "Drone likely" : level === "warn" ? "Possible drone" : "Quiet";
+  $("now").classList.toggle("alert", level !== "ok");
+  $("verdict").innerHTML = st.active ? `<span class="aff ${affClass()}"></span>Drone likely`
+    : level === "warn" ? "Possible drone" : "Quiet";
   $("conf").textContent = pct(c);
   $("fill").style.width = (c * 100) + "%";
-  $("fill").style.background = `var(--${level === "ok" ? "accent" : level})`;
   const sp = st.spectral || {};
   $("tone").textContent = sp.f0_hz ? `Rotor tone ${Math.round(sp.f0_hz)} Hz` : "No rotor tone";
   const cp = st.components || {};
@@ -293,24 +295,23 @@ function renderStatus(s) {
   else if (last && !last.ok) { $("gem-verdict").textContent = "No answer"; $("gem-detail").textContent = "Gemini did not reply. Check the internet link."; }
   else if (last) {
     $("gem-verdict").textContent = last.drone_audible === true ? "Drone" : last.drone_audible === false ? "No drone" : "Unsure";
-    $("gem-verdict").style.color = last.drone_audible ? "var(--bad)" : "var(--ok)";
     $("gem-detail").textContent = `${last.best_guess}, ${fmtTime(last.ts)}`;
   }
 }
 
-const SHOWN = { detect: ["Drone", "bad"], suppressed: ["Drone again", "warn"], clear: ["Cleared", "ok"], gemini: ["Gemini", ""],
-                enrolled: ["Taught", ""], test: ["Test alert", ""] };
+const SHOWN = { detect: ["Drone", true], suppressed: ["Drone again", true], clear: ["Cleared"], gemini: ["Gemini"],
+                enrolled: ["Taught"], test: ["Test alert"] };
 function renderLog(log) {
   if (!log) return;
   const rows = log.filter(e => SHOWN[e.kind]).slice(0, 8).map(e => {
-    const [word, cls] = SHOWN[e.kind];
+    const [word, drone] = SHOWN[e.kind];
     let detail = "";
     if (e.kind === "detect") detail = `${pct(e.confidence)}${e.f0_hz ? `, rotor tone ${Math.round(e.f0_hz)} Hz` : ""}`;
     else if (e.kind === "suppressed") detail = "cooldown, no new alert";
     else if (e.kind === "gemini") detail = e.ok ? `${e.drone_audible ? "drone" : "no drone"}, ${esc(e.best_guess)}` : "no answer";
     else if (e.kind === "enrolled") detail = e.label === "drone" ? "drone clip" : "background clip";
     else if (e.kind === "test") detail = "sent to TAK and mesh";
-    return `<li><span class="t isr-mono">${fmtTime(e.ts)}</span><span class="w ${cls}">${word}</span><span class="isr-muted">${detail}</span></li>`;
+    return `<li><span class="t isr-mono">${fmtTime(e.ts)}</span><span class="w">${drone ? `<span class="aff ${affClass()}"></span>` : ""}${word}</span><span class="isr-muted">${detail}</span></li>`;
   });
   $("log").innerHTML = rows.join("") || `<li class="isr-muted">Nothing heard yet.</li>`;
 }

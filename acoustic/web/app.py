@@ -57,6 +57,18 @@ async def isr_ui_js():
     return FileResponse(STATIC_DIR / "isr-ui.js", media_type="text/javascript")
 
 
+_FONT_TYPES = {".woff2": "font/woff2", ".txt": "text/plain; charset=utf-8"}
+
+
+@app.get("/fonts/{name}")
+async def isr_ui_font(name: str):
+    """The kit's fonts (and their OFL licences), referenced by isr-ui.css as fonts/<file>."""
+    path = STATIC_DIR / "fonts" / name
+    if "/" in name or name.startswith(".") or path.suffix not in _FONT_TYPES or not path.is_file():
+        raise HTTPException(404, "not found")
+    return FileResponse(path, media_type=_FONT_TYPES[path.suffix])
+
+
 @app.get("/api/status")
 async def status():
     e = _engine()

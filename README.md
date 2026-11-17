@@ -400,8 +400,10 @@ profiles.d/          pi-profiles config for this tool only (combined profiles li
 tests/               pytest
 ```
 
-## License
+## Licence
 
 MIT, see [LICENSE](LICENSE). The YAMNet model (downloaded at install, not committed) and
-`acoustic/data/yamnet_class_map.csv` come from Google under the Apache 2.0 licence. No audio
+`acoustic/data/yamnet_class_map.csv` come from Google under the Apache 2.0 licence. The UI fonts in `acoustic/web/static/fonts/`
+(Barlow Condensed, IBM Plex Mono) are under the SIL Open Font License; their licence texts sit beside
+them. No audio
 recordings are committed: tests and `--simulate` use synthetic signals only.
