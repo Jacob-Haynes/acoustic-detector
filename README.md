@@ -126,8 +126,8 @@ sudo nano /etc/acoustic-detector.env     # set SENSOR_NAME, SENSOR_LAT, SENSOR_L
 ```
 
 If YAMNet can't run (no LiteRT wheel, no model, no class map), the sensor **still starts** and runs
-prop-comb detection only. It logs one warning, the UI's model chip says *YAMNet unavailable
-(offline install?)*, and the heartbeat is `degraded` with that text in `detail`.
+prop-comb detection only. It logs one warning, the UI's status pill turns *Degraded* and its Detector row says
+*YAMNet unavailable (offline install?)*, and the heartbeat is `degraded` with that text in `detail`.
 
 The install script is idempotent and non-interactive. It installs apt packages, creates an
 `acoustic` service user in the `audio` group, puts the code in `/opt/acoustic-detector` with a venv,
@@ -228,15 +228,15 @@ recognise it** (it hears "Music"). To see YAMNet properly, replay a real recordi
 ## Teach it your drone (calibration)
 
 In the UI:
-1. Hover or fly the quad 5–30 m from the mic and press **Record drone (5 s)**. Do 3–5 clips at
+1. Hover or fly the quad 5–30 m from the mic and press **Record drone** (5 s). Do 3–5 clips at
    different throttle and distance. A clip with no audible prop tone is flagged and ignored where
    possible.
-2. With the quad powered off, press **Record background (5 s)** once or twice. This is what stops
+2. With the quad powered off, press **Record background** (5 s) once or twice. This is what stops
    wind and distant traffic matching your drone.
-3. The "My drone" bar now moves, and it counts for half of the base score.
+3. *My drone* under **Details** now moves, and it counts for half of the base score.
 
-You can also **enrol from existing footage**. In the UI, under *From file*, pick an MP4/MOV
-(GoPro, phone, DVR) or a WAV/MP3, choose *as drone* or *as background*, and press **Enrol file**.
+You can also **enrol from existing footage**. In the UI, open **Details**, and under *Teach from a file* pick an MP4/MOV
+(GoPro, phone, DVR) or a WAV/MP3, choose *As drone* or *As background*, and press **Teach file**.
 The audio track is extracted on the device (PyAV, no ffmpeg needed) and the first 120 s are used.
 The result shows what percentage of the file contained a prop tone. From the command line:
 
@@ -276,16 +276,16 @@ laptop or Bluetooth speaker about 1–2 m from the mic, starting at **low volume
    moves, while the confidence stays low and the log stays empty. Point out the *YAMNet top* line
    saying "Speech" when people talk. Press **Record background (5 s)** once while people chat
    normally. This teaches the sensor what "this room" sounds like.
-2. **Enrol (1 min).** Under *From file*, enrol your drone footage *as drone* (or play it and press
-   **Record drone (5 s)** two or three times). The "My drone" bar becomes active.
+2. **Enrol (1 min).** Under **Details** → *Teach from a file*, teach your drone footage *As drone* (or play it and
+   press **Record drone** two or three times). *My drone* under Details becomes active.
 3. **Approach.** Play the drone clip and slowly raise the volume. The stacked horizontal lines of
-   the prop comb appear on the waterfall. The *Prop comb* and *My drone* bars rise, and when the
-   confidence crosses the red tick for 1.5 s the banner goes **DRONE DETECTED**. The ATAK marker and
+   the prop comb appear on the waterfall. The confidence rises, and when it crosses the tick for
+   1.5 s the verdict turns red: **Drone likely**. The ATAK marker and
    the mesh text `ACOUSTIC: drone detected conf … @ MIC1` follow immediately.
-4. **Recede.** Lower the volume and the confidence falls. About 3 s below the amber tick, the log
-   shows `clear`.
-5. **Cooldown.** Raise the volume again within 60 s: the log shows `suppressed` and no second mesh
-   text is sent.
+4. **Recede.** Lower the volume and the confidence falls. About 3 s below the clear threshold,
+   *Recent detections* shows **Cleared**.
+5. **Cooldown.** Raise the volume again within 60 s: *Recent detections* shows **Drone again**
+   (cooldown, no new alert) and no second mesh text is sent.
 6. **Try to fool it.** Talk loudly, whistle, hum, or play music near the mic. Discuss what moves the
    meter and what doesn't. A sustained whistle or hum is the honest weak spot: it's a steady tone,
    exactly the feature being looked for.
@@ -320,18 +320,18 @@ before the demo.
 
 1. Start a pi-platform scenario profile that includes `acoustic-detector`, `opentakserver` and
    `mesh-bridge` (see the pi-profiles repo). Open the UI on a laptop or phone and ATAK on a tablet. Check
-   that the chips read *Input MIC*, *ATAK connected* and *Mesh connected*, and that the Gemini chip
-   reads *OFFLINE* (or *CLOUD* if you chose to enable it).
+   the tag reads **LIVE** and the status pill reads *Ready* (click it: Input microphone, TAK and
+   Mesh connected). Gemini is listed only if you chose to enable it.
 2. Talk next to the mic: the waterfall moves, and the confidence stays low. *"It's listening for a
    specific signature, not just loudness."*
 3. **Calibrate** (2 minutes): hover the FPV about 10 m away and record 3 drone clips, then 1
    background clip with it disarmed.
 4. Land the quad about 150 m out. Fly it slowly **toward the Pi**. On the waterfall, the prop comb
-   appears as stacked horizontal lines that bend with throttle. Confidence climbs and the banner goes
-   red with **DRONE DETECTED**. At the same moment the ATAK marker appears at the sensor with its radius
+   appears as stacked horizontal lines that bend with throttle. Confidence climbs and the verdict turns
+   red: **Drone likely**. At the same moment the ATAK marker appears at the sensor with its radius
    ring, and the mesh node shows `ACOUSTIC: drone detected conf 0.8x @ MIC1`.
-5. Fly away again: after about 3 s below threshold it clears. Fly back within 60 s and the log shows
-   `suppressed` with no second mesh text. *"That's the cooldown, so the mesh isn't spammed."*
+5. Fly away again: after about 3 s below threshold it clears. Fly back within 60 s and the list shows
+   **Drone again** with no second mesh text. *"That's the cooldown, so the mesh isn't spammed."*
 6. Optional: press **Ask Gemini** to show a cloud second opinion next to the on-device result.
    Discuss when you would or wouldn't want a sensor that depends on the cloud.
 7. False-positive discussion: start a petrol generator, a strimmer, or a car engine near the mic,

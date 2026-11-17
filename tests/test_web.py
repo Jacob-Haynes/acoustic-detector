@@ -17,7 +17,30 @@ def client(settings):
 
 def test_index(client):
     r = client.get("/")
-    assert r.status_code == 200 and "ACOUSTIC DETECTOR" in r.text
+    assert r.status_code == 200 and "<h1>Acoustic</h1>" in r.text
+
+
+# sha256 of ui-kit/isr-ui.{css,js} v1. The served copies must be byte-identical to the kit:
+# change the kit at its source and re-copy, never edit the vendored files.
+KIT_SHA256 = {
+    "isr-ui.css": "4e19df9824145ead677fc30dfa28eb802294151ee16e3c4046545c6d9ce89666",
+    "isr-ui.js": "a0b67a8409914a0376be7e2f51d7d4cca0fd86f7ab7ea25f048aa855cb9b1fb9",
+}
+
+
+def test_page_uses_isr_kit(client):
+    import hashlib
+
+    html = client.get("/").text
+    assert '<link rel="stylesheet" href="isr-ui.css">' in html
+    assert '<script src="isr-ui.js"></script>' in html
+    assert html.index("isr-ui.css") < html.index("<style>")      # kit loads before page CSS
+    assert 'id="isr-status"' in html and 'id="isr-kit-link"' in html
+    assert html.count("isr-btn primary") == 1
+    for name, digest in KIT_SHA256.items():
+        r = client.get("/" + name)
+        assert r.status_code == 200
+        assert hashlib.sha256(r.content).hexdigest() == digest, f"{name} differs from the kit"
 
 
 def test_status_shows_modes(client):

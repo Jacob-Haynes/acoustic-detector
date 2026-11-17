@@ -3,188 +3,123 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Acoustic Detector</title>
+<title>Acoustic</title>
+<link rel="stylesheet" href="isr-ui.css">
+<script src="isr-ui.js"></script>
 <style>
-  :root {
-    --bg: #0d1117; --panel: #161b22; --line: #30363d; --text: #e6edf3; --muted: #8b949e;
-    --ok: #3fb950; --warn: #d29922; --bad: #f85149; --accent: #58a6ff; --cloud: #a371f7;
-  }
-  * { box-sizing: border-box; }
-  body { margin: 0; background: var(--bg); color: var(--text);
-         font: 14px/1.4 system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
-  header { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px;
-           padding: 10px 16px; border-bottom: 1px solid var(--line); }
-  header h1 { font-size: 16px; margin: 0; letter-spacing: .04em; }
-  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
-  .chip { border: 1px solid var(--line); border-radius: 999px; padding: 2px 10px; font-size: 12px;
-          color: var(--muted); white-space: nowrap; }
-  .chip b { color: var(--text); font-weight: 600; }
-  .chip.ok { border-color: var(--ok); } .chip.ok b { color: var(--ok); }
-  .chip.off { border-color: var(--line); }
-  .chip.bad { border-color: var(--bad); } .chip.bad b { color: var(--bad); }
-  .chip.cloud { border-color: var(--cloud); } .chip.cloud b { color: var(--cloud); }
-  main { display: grid; grid-template-columns: 340px 1fr; gap: 12px; padding: 12px 16px; }
-  @media (max-width: 900px) { main { grid-template-columns: 1fr; } }
-  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px; }
-  .panel h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted);
-              margin: 0 0 8px; }
-  #banner { text-align: center; padding: 16px 8px; border-radius: 6px; font-size: 22px; font-weight: 700;
-            letter-spacing: .06em; background: #0f2a17; color: var(--ok); transition: background .2s; }
-  #banner.active { background: #3d0f0f; color: #ffb4ae; animation: pulse 1s infinite alternate; }
-  @keyframes pulse { from { box-shadow: 0 0 0 0 rgba(248,81,73,.6);} to { box-shadow: 0 0 18px 2px rgba(248,81,73,.6);} }
-  .meter { position: relative; height: 26px; background: #0b0f14; border: 1px solid var(--line);
-           border-radius: 4px; margin: 12px 0 4px; overflow: hidden; }
+  /* Layout specific to this tool only; colours, type and controls come from isr-ui.css. */
+  .layout { display: grid; grid-template-columns: 380px 1fr; gap: var(--gap); align-items: start; }
+  .col { display: grid; gap: var(--gap); }
+  @media (max-width: 900px) { .layout { grid-template-columns: 1fr; } }
+  .head { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
+  #verdict { font-size: 30px; font-weight: 700; margin: 4px 0 2px; }
+  #verdict.bad { color: var(--bad); } #verdict.warn { color: var(--warn); } #verdict.ok { color: var(--ok); }
+  .meter { position: relative; height: 14px; margin: 12px 0 6px; background: var(--panel-2);
+           border: 1px solid var(--line); border-radius: 999px; overflow: hidden; }
   .meter .fill { position: absolute; inset: 0 auto 0 0; width: 0; background: var(--accent); transition: width .25s; }
-  .meter .tick { position: absolute; top: 0; bottom: 0; width: 2px; }
-  .meter .tick.on { background: var(--bad); } .meter .tick.off { background: var(--warn); }
-  .meter .val { position: absolute; right: 8px; top: 3px; font-weight: 700; font-variant-numeric: tabular-nums; }
-  .legend { font-size: 11px; color: var(--muted); display: flex; justify-content: space-between; }
-  .comp { display: grid; grid-template-columns: 118px 1fr 70px; align-items: center; gap: 8px; margin: 6px 0; font-size: 13px; }
-  .comp .bar { height: 8px; background: #0b0f14; border-radius: 4px; overflow: hidden; }
-  .comp .bar div { height: 100%; width: 0; background: var(--accent); transition: width .25s; }
-  .comp.na { color: var(--muted); } .comp.na .bar div { background: transparent; }
-  .comp.neg .bar div { background: var(--warn); }
-  .num { font-variant-numeric: tabular-nums; text-align: right; }
-  .kv { display: grid; grid-template-columns: auto 1fr; gap: 2px 10px; font-size: 13px; }
-  .kv span:nth-child(odd) { color: var(--muted); }
-  canvas { display: block; width: 100%; background: #000; border-radius: 4px; }
-  #wfwrap { position: relative; }
-  #faxis { position: absolute; left: 4px; top: 0; bottom: 0; pointer-events: none; font-size: 10px; color: #cfd8e3; }
-  #faxis div { position: absolute; transform: translateY(-50%); text-shadow: 0 0 3px #000; }
-  .btns { display: flex; flex-wrap: wrap; gap: 6px; }
-  button { background: #21262d; color: var(--text); border: 1px solid var(--line); border-radius: 6px;
-           padding: 7px 10px; font: inherit; cursor: pointer; }
-  button:hover:not(:disabled) { border-color: var(--accent); }
-  button:disabled { opacity: .45; cursor: not-allowed; }
-  button.primary { background: #1f3a5f; border-color: #2f5f9a; }
-  button.cloud { border-color: var(--cloud); }
-  select, input[type=file] { background: #21262d; color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 5px; font: inherit; max-width: 100%; }
-  .progress { height: 4px; background: #0b0f14; border-radius: 2px; margin-top: 8px; overflow: hidden; }
+  .meter .tick { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--muted); }
+  .btns { display: flex; flex-wrap: wrap; gap: 10px; }
+  .progress { height: 4px; margin-top: 10px; background: var(--panel-2); border-radius: 2px; overflow: hidden; }
   .progress div { height: 100%; width: 0; background: var(--bad); }
-  .small { font-size: 12px; color: var(--muted); }
-  table { width: 100%; border-collapse: collapse; font-size: 13px; }
-  th, td { text-align: left; padding: 4px 6px; border-bottom: 1px solid var(--line); white-space: nowrap; }
-  th { color: var(--muted); font-weight: 500; font-size: 12px; }
-  td.wrap { white-space: normal; }
-  .k-detect { color: var(--bad); font-weight: 700; } .k-clear { color: var(--ok); }
-  .k-suppressed { color: var(--warn); } .k-gemini { color: var(--cloud); } .k-enrolled, .k-test { color: var(--accent); }
-  #gemini { border-color: #3b2a5c; }
-  #gemini .verdict { font-size: 18px; font-weight: 700; margin: 4px 0; }
-  .stack { display: grid; gap: 12px; align-content: start; }
-  .truth { color: var(--warn); }
+  canvas { display: block; width: 100%; background: #000; border-radius: 6px; }
+  #wfwrap { position: relative; }
+  #faxis { position: absolute; left: 6px; top: 0; bottom: 0; pointer-events: none; font-size: 12px; color: #cfd8e3; }
+  #faxis div { position: absolute; transform: translateY(-50%); white-space: nowrap; text-shadow: 0 0 3px #000; }
+  #log li .t { color: var(--muted); min-width: 92px; }
+  #log li .w { font-weight: 600; min-width: 120px; }
+  #log li .w.bad { color: var(--bad); } #log li .w.warn { color: var(--warn); } #log li .w.ok { color: var(--ok); }
+  .kv { display: grid; grid-template-columns: max-content 1fr; gap: 4px 14px; margin: 8px 0 12px; }
+  .kv > :nth-child(odd) { color: var(--muted); }
+  .kv > :nth-child(even) { color: var(--text); }
+  details.isr-more h3 { margin: 14px 0 6px; font-size: 14px; color: var(--text); }
+  details.isr-more .btns { margin: 6px 0; }
+  select { max-width: 100%; }
 </style>
 </head>
 <body>
-<header>
-  <h1>ACOUSTIC DETECTOR <span id="sensor" style="color:var(--muted)"></span></h1>
-  <div class="chips">
-    <span class="chip" id="c-source">Input <b>…</b></span>
-    <span class="chip" id="c-model">On-device <b>…</b></span>
-    <span class="chip" id="c-cal">Calibration <b>…</b></span>
-    <span class="chip" id="c-gemini">Gemini <b>…</b></span>
-    <span class="chip" id="c-tak">ATAK <b>…</b></span>
-    <span class="chip" id="c-mesh">Mesh <b>…</b></span>
-    <span class="chip" id="c-ws">UI <b>connecting</b></span>
+<header class="isr-bar">
+  <h1>Acoustic</h1><span class="isr-sub">Hears rotors</span>
+  <div class="isr-right">
+    <button class="isr-pill" id="isr-status">Starting</button>
+    <a class="isr-kit-link" id="isr-kit-link" href="#">Kit</a>
   </div>
+  <div class="isr-status-list" id="isr-status-list"></div>
 </header>
 
 <main>
-  <div class="stack">
-    <section class="panel">
-      <div id="banner">LISTENING</div>
-      <div class="meter" id="meter">
-        <div class="fill" id="fill"></div>
-        <div class="tick off" id="tick-off" title="clear threshold"></div>
-        <div class="tick on" id="tick-on" title="detect threshold"></div>
-        <div class="val" id="confval">0.00</div>
-      </div>
-      <div class="legend"><span>confidence (smoothed)</span><span><span style="color:var(--warn)">▮</span> clear &nbsp;<span style="color:var(--bad)">▮</span> detect</span></div>
-      <div style="margin-top:10px">
-        <div class="comp" id="cp-spectral"><span>Prop comb</span><div class="bar"><div></div></div><span class="num">–</span></div>
-        <div class="comp" id="cp-yamnet"><span>YAMNet drone</span><div class="bar"><div></div></div><span class="num">–</span></div>
-        <div class="comp neg" id="cp-confuser"><span>YAMNet confuser</span><div class="bar"><div></div></div><span class="num">–</span></div>
-        <div class="comp" id="cp-calibration"><span>My drone</span><div class="bar"><div></div></div><span class="num">–</span></div>
-      </div>
-      <div class="kv" style="margin-top:8px">
-        <span>Prop tone</span><span id="f0">–</span>
-        <span>Level</span><span id="level">–</span>
-        <span>YAMNet top</span><span id="top">–</span>
-        <span id="truthk" hidden>Sim truth</span><span id="truth" class="truth" hidden>–</span>
-      </div>
-    </section>
+  <div class="isr-banner bad" id="banner" hidden></div>
+  <div class="layout">
+    <div class="col">
+      <section class="isr-card">
+        <div class="head"><h2>Now</h2><span class="isr-tag" id="srctag">…</span></div>
+        <div id="verdict" class="ok">Quiet</div>
+        <div class="isr-big" id="conf">0%</div>
+        <div class="meter"><div class="fill" id="fill"></div><div class="tick" id="tick-on"></div></div>
+        <div class="isr-muted" id="tone">No rotor tone</div>
+      </section>
 
-    <section class="panel">
-      <h2>Microphone</h2>
-      <div class="btns">
-        <select id="dev-select" style="flex:1;min-width:0"><option>loading…</option></select>
-        <button id="dev-use">Use</button>
-        <button id="dev-refresh" title="re-scan devices">↻</button>
-      </div>
-      <div class="comp" style="margin-top:8px"><span>Input peak</span><div class="bar"><div id="peakbar"></div></div><span class="num" id="peakval">–</span></div>
-      <div class="small" id="devinfo"></div>
-    </section>
+      <section class="isr-card">
+        <h2>Teach it your drone</h2>
+        <p class="isr-muted" id="calinfo">Fly the drone 5 to 30 m from the mic, then record.</p>
+        <div class="btns">
+          <button class="isr-btn primary" id="rec-drone">Record drone</button>
+          <button class="isr-btn" id="rec-bg">Record background</button>
+        </div>
+        <div class="progress"><div id="recprog"></div></div>
+      </section>
 
-    <section class="panel">
-      <h2>Teach it your drone</h2>
-      <div class="btns">
-        <button class="primary" id="rec-drone">● Record drone (5 s)</button>
-        <button id="rec-bg">● Record background (5 s)</button>
-        <button id="cal-clear">Clear</button>
-      </div>
-      <div class="btns" style="margin-top:8px">
-        <label class="small" style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
-          From file (MP4/MOV/WAV/MP3):
-          <input type="file" id="enrol-file" accept="audio/*,video/*,.mp4,.mov,.wav,.mp3,.flac,.ogg,.m4a">
-        </label>
-        <select id="enrol-label"><option value="drone">as drone</option><option value="background">as background</option></select>
-        <button id="enrol-go">Enrol file</button>
-      </div>
-      <div class="progress"><div id="recprog"></div></div>
-      <p class="small" id="calinfo">Hover or fly the drone 5–30 m from the mic, then press Record drone. Do 3–5 clips at different throttle and distance, plus 1–2 background clips with the drone off.</p>
-    </section>
+      <section class="isr-card" id="gemini" hidden>
+        <h2>Cloud second opinion</h2>
+        <div class="head"><span id="gem-verdict" class="isr-big" style="font-size:24px">–</span>
+          <button class="isr-btn" id="gem-ask">Ask Gemini</button></div>
+        <p class="isr-muted" id="gem-detail">Sends the last 4 s of audio to Google.</p>
+      </section>
+    </div>
 
-    <section class="panel" id="gemini">
-      <h2>Cloud second opinion (Gemini)</h2>
-      <div id="gem-mode" class="small">…</div>
-      <div class="verdict" id="gem-verdict"></div>
-      <div class="small" id="gem-detail"></div>
-      <div class="btns" style="margin-top:8px">
-        <button class="cloud" id="gem-ask" disabled>Ask Gemini about last 4 s</button>
-      </div>
-    </section>
-
-    <section class="panel">
-      <h2>Outputs</h2>
-      <div class="kv" id="outputs"></div>
-      <div class="btns" style="margin-top:8px"><button id="test">Send test alert</button></div>
-      <div class="small" id="testres"></div>
-    </section>
+    <div class="col">
+      <section class="isr-card">
+        <h2>Live sound</h2>
+        <div id="wfwrap"><canvas id="wf" style="height:260px"></canvas><div id="faxis"></div></div>
+        <canvas id="hist" style="height:56px;margin-top:8px"></canvas>
+      </section>
+      <section class="isr-card">
+        <h2>Recent detections</h2>
+        <ul class="isr-list" id="log"></ul>
+      </section>
+    </div>
   </div>
 
-  <div class="stack">
-    <section class="panel">
-      <h2>Live waterfall (50 Hz – 8 kHz, log scale)</h2>
-      <div id="wfwrap">
-        <canvas id="wf" style="height:300px"></canvas>
-        <div id="faxis"></div>
-      </div>
-      <canvas id="hist" style="height:70px;margin-top:8px"></canvas>
-      <div class="small">confidence, last 60 s</div>
-    </section>
-    <section class="panel">
-      <h2>Detection log</h2>
-      <table>
-        <thead><tr><th>Time</th><th>Event</th><th>Conf</th><th>Detail</th></tr></thead>
-        <tbody id="log"></tbody>
-      </table>
-    </section>
-  </div>
+  <details class="isr-more">
+    <summary>Details</summary>
+    <h3>Detector</h3>
+    <div class="kv" id="detector"></div>
+    <h3>Input device</h3>
+    <div class="btns">
+      <select id="dev-select"><option>Loading</option></select>
+      <button class="isr-btn" id="dev-use">Use</button>
+      <button class="isr-btn" id="dev-refresh">Rescan</button>
+    </div>
+    <div id="devinfo"></div>
+    <h3>Teach from a file</h3>
+    <div class="btns">
+      <input type="file" id="enrol-file" accept="audio/*,video/*,.mp4,.mov,.wav,.mp3,.flac,.ogg,.m4a">
+      <select id="enrol-label"><option value="drone">As drone</option><option value="background">As background</option></select>
+      <button class="isr-btn" id="enrol-go">Teach file</button>
+      <button class="isr-btn danger" id="cal-clear">Clear clips</button>
+    </div>
+    <div>Video or audio, first 120 s used. Record 3 to 5 drone clips at different throttle and distance, plus 1 or 2 with the drone off.</div>
+    <h3>Outputs</h3>
+    <div class="kv" id="outputs"></div>
+    <div class="btns"><button class="isr-btn" id="test">Send test alert</button></div>
+    <div id="testres"></div>
+  </details>
 </main>
 
 <script>
 const $ = (id) => document.getElementById(id);
 let meta = { bins: 128, fmin: 50, fmax: 8000 };
 let thresholds = { on: 0.65, off: 0.4 };
+let wsLive = false, lastStatus = null;
 
 // ---------- waterfall ----------
 const wf = $("wf"), wctx = wf.getContext("2d");
@@ -209,7 +144,7 @@ function drawAxis() {
   [100, 200, 500, 1000, 2000, 4000].forEach(f => {
     const frac = Math.log(f / meta.fmin) / Math.log(meta.fmax / meta.fmin);
     const d = document.createElement("div"); d.style.top = (100 - frac * 100) + "%";
-    d.textContent = f >= 1000 ? (f / 1000) + "k" : f; ax.appendChild(d);
+    d.textContent = f >= 1000 ? (f / 1000) + " kHz" : f + " Hz"; ax.appendChild(d);
   });
 }
 function pushColumns(cols) {
@@ -234,140 +169,150 @@ function pushColumns(cols) {
   wctx.putImageData(img, W - shift, 0);
 }
 
-// ---------- history sparkline ----------
+// ---------- confidence history (last 60 s) ----------
 const hist = $("hist"), hctx = hist.getContext("2d");
 function drawHistory(h) {
   sizeCanvas(hist);
   const W = hist.width, H = hist.height;
   hctx.fillStyle = "#000"; hctx.fillRect(0, 0, W, H);
-  [["#d29922", thresholds.off], ["#f85149", thresholds.on]].forEach(([c, v]) => {
-    hctx.strokeStyle = c; hctx.setLineDash([4, 4]); hctx.beginPath();
-    hctx.moveTo(0, H - v * H); hctx.lineTo(W, H - v * H); hctx.stroke();
-  });
+  hctx.strokeStyle = "#8b97a6"; hctx.setLineDash([4, 4]); hctx.beginPath();
+  hctx.moveTo(0, H - thresholds.on * H); hctx.lineTo(W, H - thresholds.on * H); hctx.stroke();
   hctx.setLineDash([]);
   if (!h || h.length < 2) return;
-  hctx.strokeStyle = "#58a6ff"; hctx.lineWidth = 2 * devicePixelRatio; hctx.beginPath();
+  hctx.strokeStyle = "#4ea1ff"; hctx.lineWidth = 2 * devicePixelRatio; hctx.beginPath();
   h.forEach((v, i) => { const x = W - (h.length - 1 - i) * (W / 119); const y = H - v * H; i ? hctx.lineTo(x, y) : hctx.moveTo(x, y); });
   hctx.stroke(); hctx.lineWidth = 1;
 }
 
-// ---------- state rendering ----------
-function chip(id, label, value, cls) { const el = $(id); el.className = "chip " + (cls || ""); el.innerHTML = label + " <b>" + value + "</b>"; }
-function comp(id, v, na) {
-  const el = $(id);
-  el.classList.toggle("na", v === null || v === undefined);
-  el.querySelector(".bar div").style.width = ((v || 0) * 100) + "%";
-  el.querySelector(".num").textContent = (v === null || v === undefined) ? (na || "off") : v.toFixed(2);
-}
+// ---------- rendering ----------
 function fmtTime(ts) { return new Date(ts * 1000).toLocaleTimeString(); }
 function esc(s) { return String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c])); }
+function pct(v) { return Math.round((v || 0) * 100) + "%"; }
+function kv(el, rows) { $(el).innerHTML = rows.map(([k, v]) => `<span>${k}</span><span>${v}</span>`).join(""); }
 
 function renderState(st) {
   if (!st) return;
   const c = st.confidence || 0;
+  const level = st.active ? "bad" : c >= thresholds.off ? "warn" : "ok";
+  $("verdict").className = level;
+  $("verdict").textContent = st.active ? "Drone likely" : level === "warn" ? "Possible drone" : "Quiet";
+  $("conf").textContent = pct(c);
   $("fill").style.width = (c * 100) + "%";
-  $("fill").style.background = st.active ? "var(--bad)" : (c >= thresholds.off ? "var(--warn)" : "var(--accent)");
-  $("confval").textContent = c.toFixed(2);
-  const b = $("banner"); b.classList.toggle("active", !!st.active);
-  b.textContent = st.active ? "DRONE DETECTED" : "LISTENING";
-  const cp = st.components || {};
-  comp("cp-spectral", cp.spectral);
-  comp("cp-yamnet", cp.yamnet, "not loaded");
-  comp("cp-confuser", cp.confuser, "not loaded");
-  comp("cp-calibration", cp.calibration, "not enrolled");
+  $("fill").style.background = `var(--${level === "ok" ? "accent" : level})`;
   const sp = st.spectral || {};
-  $("f0").textContent = sp.f0_hz ? `${Math.round(sp.f0_hz)} Hz (${sp.n_harmonics} harmonics)` : "none";
-  $("level").textContent = sp.level_dbfs !== undefined ? sp.level_dbfs.toFixed(0) + " dBFS" : "–";
-  $("top").textContent = st.yamnet ? st.yamnet.top.map(([n, s]) => `${n} ${s.toFixed(2)}`).join(", ") : "–";
-  const hasTruth = !!st.sim_truth;
-  $("truthk").hidden = !hasTruth; $("truth").hidden = !hasTruth;
-  if (hasTruth) $("truth").textContent = st.sim_truth;
+  $("tone").textContent = sp.f0_hz ? `Rotor tone ${Math.round(sp.f0_hz)} Hz` : "No rotor tone";
+  const cp = st.components || {};
+  const n = (v, off) => (v === null || v === undefined) ? off : pct(v);
+  kv("detector", [
+    ["Prop comb", n(cp.spectral, "off")],
+    ["YAMNet drone", n(cp.yamnet, "off")],
+    ["YAMNet look-alike", n(cp.confuser, "off")],
+    ["My drone", n(cp.calibration, "not taught")],
+    ["Level", sp.level_dbfs !== undefined ? sp.level_dbfs.toFixed(0) + " dBFS" : "–"],
+    ["YAMNet hears", st.yamnet ? st.yamnet.top.map(([nm, s]) => `${esc(nm)} ${pct(s)}`).join(", ") : "–"],
+    ...(st.sim_truth ? [["Simulator truth", esc(st.sim_truth)]] : []),
+    ["Model", esc(lastStatus ? modelText(lastStatus.detector) : "–")],
+    ["Thresholds", `alert at ${pct(thresholds.on)}, clear below ${pct(thresholds.off)}`],
+  ]);
+}
+
+function modelText(d) {
+  return d.yamnet ? "YAMNet + prop comb, on this device"
+    : d.yamnet_unavailable ? "YAMNet unavailable (offline install?), prop comb only" : "Prop comb only";
+}
+
+function updatePill(s) {
+  const checks = [];
+  if (s) {
+    const src = s.source;
+    checks.push(src.error ? { name: "Input", state: "bad", text: "not working" }
+      : src.finished ? { name: "Input", state: "warn", text: "recording ended" }
+      : src.kind === "none" ? { name: "Input", state: "bad", text: "none" }
+      : { name: "Input", state: "ok", text: src.kind === "simulate" ? "simulated" : src.kind === "file" ? "recording" : "microphone" });
+    const d = s.detector;
+    checks.push({ name: "Detector", state: d.yamnet_unavailable ? "warn" : "ok",
+                  text: d.yamnet ? "YAMNet + prop comb" : d.yamnet_unavailable ? "YAMNet unavailable (offline install?)" : "prop comb only" });
+    const o = s.outputs;
+    if (o.tak) checks.push({ name: "TAK", optional: true,
+      state: !s.sensor.has_position ? "warn" : o.tak.connected ? "ok" : "bad",
+      text: !s.sensor.has_position ? "no position set" : o.tak.connected ? "connected" : "not connected" });
+    if (o.mesh) checks.push({ name: "Mesh", optional: true, state: o.mesh.connected ? "ok" : "bad",
+      text: o.mesh.connected ? "connected" : "not connected" });
+    if (s.gemini.enabled) checks.push({ name: "Gemini", optional: true, state: "ok", text: "on (cloud)" });
+  }
+  checks.push({ name: "Live view", state: wsLive ? "ok" : "bad", text: wsLive ? "live" : "reconnecting" });
+  ISR.setStatus(checks);
 }
 
 function renderStatus(s) {
   if (!s) return;
+  lastStatus = s;
   thresholds = { on: s.detector.on, off: s.detector.off };
   $("tick-on").style.left = (thresholds.on * 100) + "%";
-  $("tick-off").style.left = (thresholds.off * 100) + "%";
-  $("sensor").textContent = "· " + s.sensor.name;
   const src = s.source;
-  chip("c-source", "Input", src.kind === "simulate" ? "SIMULATED" : src.kind === "file" ? "FILE" + (src.finished ? " (ended)" : "") : "MIC",
-       src.kind === "mic" ? "ok" : "");
-  $("c-source").title = src.description;
-  chip("c-model", "On-device", s.detector.yamnet ? "YAMNet + spectral"
-       : s.detector.yamnet_unavailable ? "YAMNet unavailable (offline install?)" : "spectral only",
-       s.detector.yamnet ? "ok" : s.detector.yamnet_unavailable ? "bad" : "");
-  $("c-model").title = s.detector.yamnet_reason || "YAMNet (AudioSet) on CPU via LiteRT";
-  const cal = s.calibration;
-  chip("c-cal", "Calibration", cal.enrolled ? `${cal.counts.drone} drone / ${cal.counts.background} bg` : "none", cal.enrolled ? "ok" : "");
-  const g = s.gemini;
-  chip("c-gemini", "Gemini", g.enabled ? "CLOUD · " + g.model : "OFFLINE", g.enabled ? "cloud" : "off");
+  const tag = $("srctag");
+  tag.className = "isr-tag " + (src.kind === "simulate" ? "sim" : src.kind === "file" ? "rec" : "live");
+  tag.textContent = src.kind === "simulate" ? "SIM" : src.kind === "file" ? "REC" : "LIVE";
+  tag.title = src.description;
+  updatePill(s);
+
+  // Banner only for something to fix now.
+  const banner = $("banner");
+  const msg = src.error ? "The audio input stopped. Check the mic is plugged in, or pick another in Details."
+    : src.clipping ? "The mic is clipping. Turn the capture gain down or move the mic away." : "";
+  banner.hidden = !msg; banner.textContent = msg;
+
   const o = s.outputs;
-  chip("c-tak", "ATAK", !o.tak ? "disabled" : !s.sensor.has_position ? "no position" : o.tak.connected ? "connected" : "down",
-       !o.tak ? "" : (o.tak.connected && s.sensor.has_position) ? "ok" : "bad");
-  chip("c-mesh", "Mesh", !o.mesh ? "disabled" : o.mesh.connected ? "connected" : "broker down", !o.mesh ? "" : o.mesh.connected ? "ok" : "bad");
-
-  $("outputs").innerHTML = [
-    ["Sensor", `${esc(s.sensor.name)} ${s.sensor.has_position ? s.sensor.lat.toFixed(5) + ", " + s.sensor.lon.toFixed(5) : "(no SENSOR_LAT/LON)"}`],
-    ["ATAK", o.tak ? `${esc(o.tak.host)} · ${o.tak.connected ? "up" : "down"} · ${o.tak.sent} sent` : "disabled"],
-    ["Mesh", o.mesh ? `${esc(o.mesh.host)} · ${o.mesh.connected ? "up" : "down"} · ${o.mesh.sent} sent` : "disabled"],
+  kv("outputs", [
+    ["Sensor", `${esc(s.sensor.name)} ${s.sensor.has_position ? s.sensor.lat.toFixed(5) + ", " + s.sensor.lon.toFixed(5) : "(no position set)"}`],
+    ["TAK", o.tak ? `${esc(o.tak.host)}, ${o.tak.connected ? "connected" : "not connected"}, ${o.tak.sent} sent` : "off"],
+    ["Mesh", o.mesh ? `${esc(o.mesh.host)}, ${o.mesh.connected ? "connected" : "not connected"}, ${o.mesh.sent} sent` : "off"],
     ["Cooldown", s.detector.cooldown_s + " s between alerts"],
-  ].map(([k, v]) => `<span>${k}</span><span>${v}</span>`).join("");
-
-  // microphone
-  $("peakbar").style.width = Math.min(100, (src.peak || 0) * 100) + "%";
-  $("peakbar").style.background = src.clipping ? "var(--bad)" : (src.peak < 0.01 ? "var(--warn)" : "var(--ok)");
-  $("peakval").textContent = src.peak !== undefined ? src.peak.toFixed(2) : "–";
-  $("devinfo").textContent = src.error ? "⚠ " + src.error
-    : src.clipping ? "⚠ Clipping: turn the capture gain down (alsamixer) or move the mic away."
-    : (src.kind === "mic" && src.peak < 0.003) ? "Very quiet input: check the mic is selected and capture gain is up."
-    : src.description;
+    ["Input peak", (src.peak ?? 0).toFixed(2) + (src.kind === "mic" && src.peak < 0.003 ? " (very quiet: check the mic and gain)" : "")],
+    ["Taught clips", `${s.calibration.counts.drone || 0} drone, ${s.calibration.counts.background || 0} background`],
+  ]);
+  $("devinfo").textContent = src.description;
 
   // recording
   const rec = s.recording;
   $("recprog").style.width = rec ? (rec.progress * 100) + "%" : "0";
   ["rec-drone", "rec-bg"].forEach(id => $(id).disabled = !!rec);
-  if (rec) $("calinfo").textContent = `Recording ${rec.label}… keep it steady.`;
+  const cal = s.calibration;
+  if (rec) $("calinfo").textContent = `Recording ${rec.label === "drone" ? "drone" : "background"} for 5 s. Keep it steady.`;
   else if (s.last_record && Date.now() / 1000 - s.last_record.ts < 20)
-    $("calinfo").textContent = !s.last_record.ok ? `Save failed: ${s.last_record.error}`
-      : s.last_record.warning ? `Saved ${s.last_record.file}. ⚠ ${s.last_record.warning}` : `Saved ${s.last_record.file}. Profile rebuilt.`;
+    $("calinfo").textContent = !s.last_record.ok ? "That clip could not be saved. Try again."
+      : s.last_record.warning ? `Saved. ${s.last_record.warning}` : "Saved. It now knows this drone better.";
+  else if (cal.enrolled) $("calinfo").textContent = `Taught ${cal.counts.drone || 0} drone and ${cal.counts.background || 0} background clips.`;
 
-  // gemini
+  // gemini (only shown when a key is set)
+  const g = s.gemini;
+  $("gemini").hidden = !g.enabled;
   $("gem-ask").disabled = !g.enabled || g.busy;
-  $("gem-mode").innerHTML = g.enabled
-    ? `<b style="color:var(--cloud)">CLOUD MODE</b>: clips are uploaded to Google (${esc(g.model)}). Use demo audio only.`
-    : `OFFLINE: ${esc(g.reason)}. All detection runs on this Pi.`;
   const last = g.last;
-  if (g.busy) { $("gem-verdict").textContent = "asking…"; }
+  if (g.busy) $("gem-verdict").textContent = "Asking";
+  else if (last && !last.ok) { $("gem-verdict").textContent = "No answer"; $("gem-detail").textContent = "Gemini did not reply. Check the internet link."; }
   else if (last) {
-    if (!last.ok) { $("gem-verdict").textContent = "error"; $("gem-detail").textContent = last.error; }
-    else {
-      const v = last.drone_audible === true ? "DRONE" : last.drone_audible === false ? "NO DRONE" : "UNSURE";
-      $("gem-verdict").textContent = `${v}${last.confidence != null ? " · " + last.confidence.toFixed(2) : ""}`;
-      $("gem-verdict").style.color = last.drone_audible ? "var(--bad)" : "var(--ok)";
-      $("gem-detail").textContent = `${last.best_guess} · ${last.reason} (${last.trigger}, ${fmtTime(last.ts)}, ${last.latency_s}s)`;
-    }
+    $("gem-verdict").textContent = last.drone_audible === true ? "Drone" : last.drone_audible === false ? "No drone" : "Unsure";
+    $("gem-verdict").style.color = last.drone_audible ? "var(--bad)" : "var(--ok)";
+    $("gem-detail").textContent = `${last.best_guess}, ${fmtTime(last.ts)}`;
   }
 }
 
+const SHOWN = { detect: ["Drone", "bad"], suppressed: ["Drone again", "warn"], clear: ["Cleared", "ok"], gemini: ["Gemini", ""],
+                enrolled: ["Taught", ""], test: ["Test alert", ""] };
 function renderLog(log) {
   if (!log) return;
-  $("log").innerHTML = log.map(e => {
+  const rows = log.filter(e => SHOWN[e.kind]).slice(0, 8).map(e => {
+    const [word, cls] = SHOWN[e.kind];
     let detail = "";
-    if (e.kind === "detect" || e.kind === "suppressed" || e.kind === "clear") {
-      const c = e.components || {};
-      detail = `f0 ${e.f0_hz || "–"} Hz · comb ${c.spectral ?? "–"} · yam ${c.yamnet ?? "off"} · cal ${c.calibration ?? "off"}`;
-      if (e.yamnet_top) detail += ` · "${esc(e.yamnet_top)}"`;
-      if (e.kind === "clear" && e.peak !== undefined) detail = `peak ${e.peak}`;
-      if (e.kind === "suppressed") detail = "within cooldown, no alert · " + detail;
-      if (e.sim_truth) detail += ` · truth: ${esc(e.sim_truth)}`;
-    } else if (e.kind === "gemini") {
-      detail = e.ok ? `${e.drone_audible ? "drone" : "no drone"} · ${esc(e.best_guess)} (${e.trigger})` : "request failed";
-    } else if (e.kind === "enrolled") {
-      detail = `${e.label}: ${esc(e.file)}`;
-    } else if (e.kind === "test") { detail = "test alert sent"; }
-    return `<tr><td>${fmtTime(e.ts)}</td><td class="k-${e.kind}">${e.kind}</td><td>${e.kind === "enrolled" || e.kind === "test" ? "" : (e.confidence ?? 0).toFixed(2)}</td><td class="wrap">${detail}</td></tr>`;
-  }).join("") || `<tr><td colspan="4" class="small">No events yet.</td></tr>`;
+    if (e.kind === "detect") detail = `${pct(e.confidence)}${e.f0_hz ? `, rotor tone ${Math.round(e.f0_hz)} Hz` : ""}`;
+    else if (e.kind === "suppressed") detail = "cooldown, no new alert";
+    else if (e.kind === "gemini") detail = e.ok ? `${e.drone_audible ? "drone" : "no drone"}, ${esc(e.best_guess)}` : "no answer";
+    else if (e.kind === "enrolled") detail = e.label === "drone" ? "drone clip" : "background clip";
+    else if (e.kind === "test") detail = "sent to TAK and mesh";
+    return `<li><span class="t isr-mono">${fmtTime(e.ts)}</span><span class="w ${cls}">${word}</span><span class="isr-muted">${detail}</span></li>`;
+  });
+  $("log").innerHTML = rows.join("") || `<li class="isr-muted">Nothing heard yet.</li>`;
 }
 
 // ---------- actions ----------
@@ -377,52 +322,52 @@ async function post(url, body) {
   if (!r.ok) throw new Error(j.detail || r.statusText);
   return j;
 }
-$("rec-drone").onclick = () => post("/api/record", { label: "drone", seconds: 5 }).catch(e => alert(e.message));
-$("rec-bg").onclick = () => post("/api/record", { label: "background", seconds: 5 }).catch(e => alert(e.message));
+const say = (id, text) => { $(id).textContent = text; };
+$("rec-drone").onclick = () => post("/api/record", { label: "drone", seconds: 5 }).catch(() => say("calinfo", "Already recording. Wait for it to finish."));
+$("rec-bg").onclick = () => post("/api/record", { label: "background", seconds: 5 }).catch(() => say("calinfo", "Already recording. Wait for it to finish."));
 $("enrol-go").onclick = async () => {
   const f = $("enrol-file").files[0];
-  if (!f) { alert("Pick a video or audio file first"); return; }
+  if (!f) { say("calinfo", "Choose a video or audio file first."); return; }
   const fd = new FormData(); fd.append("file", f); fd.append("label", $("enrol-label").value);
-  $("enrol-go").disabled = true; $("calinfo").textContent = `Decoding and enrolling ${f.name}…`;
+  $("enrol-go").disabled = true; say("calinfo", `Teaching from ${f.name}.`);
   try {
     const r = await fetch("/api/enroll", { method: "POST", body: fd });
     const j = await r.json();
     if (!r.ok) throw new Error(j.detail || r.statusText);
-    const st = j.stats || {};
-    $("calinfo").textContent = `Enrolled ${f.name} as ${j.label}: ${st.seconds}s, prop tone in ${Math.round((st.prop_tone_fraction || 0) * 100)}% of it.` + (j.warning ? " ⚠ " + j.warning : "");
-  } catch (e) { $("calinfo").textContent = "Enrol failed: " + e.message; }
+    say("calinfo", `Taught from ${f.name}.` + (j.warning ? " " + j.warning : ""));
+  } catch (e) { say("calinfo", `Could not use ${f.name}. Use a clip with the drone's sound in it.`); }
   finally { $("enrol-go").disabled = false; }
 };
 async function loadDevices() {
   try {
     const d = await (await fetch("/api/devices")).json();
     const sel = $("dev-select");
-    sel.innerHTML = d.devices.map(x => `<option value="${x.index}" ${x.index === d.current ? "selected" : ""}>${x.index}: ${esc(x.name)} (${x.default_rate} Hz)</option>`).join("")
-      || `<option>no input devices found</option>`;
+    sel.innerHTML = d.devices.map(x => `<option value="${x.index}" ${x.index === d.current ? "selected" : ""}>${esc(x.name)}</option>`).join("")
+      || `<option>No input devices found</option>`;
     sel.disabled = !d.switchable; $("dev-use").disabled = !d.switchable;
-    if (!d.switchable) sel.title = "Device switching is only available in microphone mode";
-  } catch (e) { $("dev-select").innerHTML = `<option>device list unavailable</option>`; }
+  } catch (e) { $("dev-select").innerHTML = `<option>Device list unavailable</option>`; }
 }
 $("dev-refresh").onclick = loadDevices;
 $("dev-use").onclick = () => post("/api/device", { device: parseInt($("dev-select").value, 10) })
-  .then(r => { $("devinfo").textContent = "Now using " + r.source; loadDevices(); }).catch(e => alert(e.message));
+  .then(r => { say("devinfo", "Now using " + r.source); loadDevices(); })
+  .catch(() => say("devinfo", "That device did not start. Pick another or rescan."));
 loadDevices();
-$("cal-clear").onclick = () => { if (confirm("Delete all enrolled clips?")) post("/api/calibration/clear").catch(e => alert(e.message)); };
-$("gem-ask").onclick = () => post("/api/gemini").catch(e => alert(e.message));
+$("cal-clear").onclick = () => { if (confirm("Delete all taught clips?")) post("/api/calibration/clear").catch(() => {}); };
+$("gem-ask").onclick = () => post("/api/gemini").catch(() => say("gem-detail", "Gemini is off on this device."));
 $("test").onclick = () => post("/api/test-alert").then(r => {
-  $("testres").textContent = `mesh ${r.mesh_sent ? "sent" : "NOT sent (broker down?)"} · ATAK ${r.cot_queued ? "queued" : "not sent (no position)"}`;
-}).catch(e => alert(e.message));
+  say("testres", `Mesh ${r.mesh_sent ? "sent" : "not sent (broker down)"}, TAK ${r.cot_queued ? "queued" : "not sent (no position)"}.`);
+}).catch(() => say("testres", "Test alert failed."));
 
 // ---------- websocket ----------
 function connect() {
   const ws = new WebSocket((location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/ws");
-  ws.onopen = () => chip("c-ws", "UI", "live", "ok");
-  ws.onclose = () => { chip("c-ws", "UI", "reconnecting", "bad"); setTimeout(connect, 1500); };
+  ws.onopen = () => { wsLive = true; updatePill(lastStatus); };
+  ws.onclose = () => { wsLive = false; updatePill(lastStatus); setTimeout(connect, 1500); };
   ws.onmessage = (m) => {
     const d = JSON.parse(m.data);
     pushColumns(d.wf);
-    if (d.state) renderState(d.state);
     if (d.status) renderStatus(d.status);
+    if (d.state) renderState(d.state);
     if (d.history) drawHistory(d.history);
     if (d.log) renderLog(d.log);
   };

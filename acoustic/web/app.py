@@ -11,7 +11,7 @@ import time
 from pathlib import Path
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
-from fastapi.responses import HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse
 from pydantic import BaseModel
 
 from acoustic import dsp
@@ -44,6 +44,17 @@ def _engine():
 @app.get("/", response_class=HTMLResponse)
 async def index():
     return (STATIC_DIR / "index.html").read_text()
+
+
+# The shared ISR kit look, vendored unchanged from ui-kit/ (see UI-SPEC.md).
+@app.get("/isr-ui.css")
+async def isr_ui_css():
+    return FileResponse(STATIC_DIR / "isr-ui.css", media_type="text/css")
+
+
+@app.get("/isr-ui.js")
+async def isr_ui_js():
+    return FileResponse(STATIC_DIR / "isr-ui.js", media_type="text/javascript")
 
 
 @app.get("/api/status")
