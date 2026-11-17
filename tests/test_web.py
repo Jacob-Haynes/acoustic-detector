@@ -38,8 +38,11 @@ def test_page_uses_isr_kit(client):
     import hashlib
 
     html = client.get("/").text
-    assert '<link rel="stylesheet" href="isr-ui.css">' in html
-    assert '<script src="isr-ui.js"></script>' in html
+    assert '<link rel="stylesheet" href="isr-ui.css?v=2">' in html       # kit version, busts old caches
+    assert '<script src="isr-ui.js?v=2"></script>' in html
+    assert client.get("/").headers["cache-control"] == "no-cache"
+    for name in ("isr-ui.css", "isr-ui.js"):                             # ?v= matches the file's own vN
+        assert client.get("/" + name).text.startswith("/* isr-ui." + name.split(".")[1] + " v2")
     assert html.index("isr-ui.css") < html.index("<style>")      # kit loads before page CSS
     assert 'id="isr-status"' in html and 'id="isr-kit-link"' in html
     assert html.count("isr-btn primary") == 1

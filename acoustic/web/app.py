@@ -43,10 +43,11 @@ def _engine():
 
 @app.get("/", response_class=HTMLResponse)
 async def index():
-    return (STATIC_DIR / "index.html").read_text()
+    # no-cache: the page links the kit as isr-ui.css?v=N, so a fresh page always pulls the current kit.
+    return HTMLResponse((STATIC_DIR / "index.html").read_text(), headers={"Cache-Control": "no-cache"})
 
 
-# The shared ISR kit look, vendored unchanged from ui-kit/ (see UI-SPEC.md).
+# The shared ISTAR kit look, vendored unchanged from ui-kit/ (see UI-SPEC.md).
 @app.get("/isr-ui.css")
 async def isr_ui_css():
     return FileResponse(STATIC_DIR / "isr-ui.css", media_type="text/css")
