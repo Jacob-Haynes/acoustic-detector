@@ -4,10 +4,10 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Acoustic</title>
-<link rel="stylesheet" href="isr-ui.css?v=2">
-<script src="isr-ui.js?v=2"></script>
+<link rel="stylesheet" href="isr-ui.css?v=3">
+<script src="isr-ui.js?v=3"></script>
 <style>
-  /* Inline, so it ships with the page (served no-cache). Layout specific to this tool only; colours, type and controls come from isr-ui.css (kit v2). */
+  /* Inline, so it ships with the page (served no-cache). Layout specific to this tool only; colours, type and controls come from isr-ui.css (kit v3). */
   .layout { display: grid; grid-template-columns: 380px 1fr; gap: var(--gap); align-items: start; }
   .col { display: grid; gap: var(--gap); }
   @media (max-width: 900px) { .layout { grid-template-columns: 1fr; } }
@@ -84,7 +84,7 @@
         <ul class="isr-list" id="log"></ul>
       </section>
       <section class="isr-card" id="demo">
-        <div class="head"><h2>Demo</h2><span class="isr-tag sim" id="demotag" style="display:none">SIM</span></div>
+        <div class="head"><h2>Demo</h2><span class="isr-tag sim" id="demotag" hidden>SIM</span></div>
         <p class="isr-muted" id="demoinfo">Loading</p>
         <div class="btns"><span class="contents" id="demobtns"></span><button class="isr-btn" id="demo-clear">Clear demo</button></div>
       </section>
@@ -325,7 +325,7 @@ function renderDemo(d, src) {
     const sc = d.scenarios.find(x => x.id === id), left = Math.max(0, Math.round((d.until[id] || now) - now));
     return `${sc ? sc.label : id}, ${left} s left`;
   });
-  $("demotag").style.display = d.labelled ? "" : "none";   // the kit styles .isr-tag, so not [hidden]
+  $("demotag").hidden = !d.labelled;
   $("demoinfo").textContent = running.length ? `Running: ${running.join("; ")}. Its alerts are marked SIMULATED.`
     : d.labelled ? "Demo detection still showing. Clear demo removes it."
     : (d.mode === "on_demand" ? "Nothing simulated runs on its own. " : "")
