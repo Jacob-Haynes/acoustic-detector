@@ -55,12 +55,22 @@ def build_event(uid: str, cot_type: str, lat: float, lon: float, hae: float, cal
     )
 
 
+def detection_uid(sensor_name: str, demo: bool = False) -> str:
+    """Demo detections get their own uid, so clearing the demo can never remove a real marker."""
+    return f"ACOUSTIC-{sensor_name}-UAV" + ("-SIM" if demo else "")
+
+
+def detection_type(affiliation: str = "u") -> str:
+    return f"a-{affiliation}-A-M-F-Q"            # standard CoT air type; -A-M-F-Q = UAV/drone
+
+
 def detection_event(sensor_name: str, lat: float, lon: float, hae: float, confidence: float,
                     radius_m: float, affiliation: str = "u", f0_hz: float = 0.0,
-                    source: str = "", now: float | None = None, parent_uid: str | None = None) -> str:
+                    source: str = "", now: float | None = None, parent_uid: str | None = None,
+                    demo: bool = False, stale_s: float = DETECTION_STALE_S, note: str = "") -> str:
     """UAV marker placed at the sensor (acoustics gives presence, not position). ce = rough range."""
-    uid = f"ACOUSTIC-{sensor_name}-UAV"
-    cot_type = f"a-{affiliation}-A-M-F-Q"        # standard CoT air type; -A-M-F-Q = UAV/drone
+    uid = detection_uid(sensor_name, demo)
+    cot_type = detection_type(affiliation)
     remarks = remarks_prefix(source) + (
         f"ACOUSTIC drone detection by sensor {sensor_name}. conf {confidence:.2f}. "
         f"Marker is the SENSOR position: target is within ~{radius_m:.0f} m, bearing unknown."
@@ -69,9 +79,29 @@ def detection_event(sensor_name: str, lat: float, lon: float, hae: float, confid
         remarks += f" Prop tone ~{f0_hz:.0f} Hz."
     if source:
         remarks += f" Input: {'live microphone' if source == 'mic' else source}."
+    if note:
+        remarks += " " + note
     # how="m-f": machine-derived/fused rather than a measured target position.
     return build_event(uid, cot_type, lat, lon, hae, f"UAV? (acoustic {sensor_name})", remarks,
-                       DETECTION_STALE_S, ce=radius_m, how="m-f", now=now, parent_uid=parent_uid)
+                       stale_s, ce=radius_m, how="m-f", now=now, parent_uid=parent_uid)
+
+
+def delete_event(target_uid: str, target_type: str, lat: float, lon: float, source: str = "",
+                 now: float | None = None) -> str:
+    """t-x-d-d with __forcedelete: ATAK removes the linked marker at once (as op-sentry does).
+    OTS 1.8.3 relays it but keeps its stored copy, so send the marker with stale = now first; and it
+    marks the sender disconnected until its next registration SA, so resend that straight after.
+    The point is the sensor, never 0,0 (OTS stores it against the sender)."""
+    now = time.time() if now is None else now
+    return (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        f'<event version="2.0" uid={quoteattr(f"{target_uid}-del-{int(now * 1000)}")} type="t-x-d-d"'
+        f' how="h-g-i-g-o" time="{isotime(now)}" start="{isotime(now)}" stale="{isotime(now + 10)}">'
+        f'<point lat="{lat:.6f}" lon="{lon:.6f}" hae="0.0" ce="9999999.0" le="9999999.0"/>'
+        f'<detail><link uid={quoteattr(target_uid)} relation="none" type={quoteattr(target_type)}/>'
+        f"<__forcedelete/><remarks>{escape(remarks_prefix(source) + 'Demo cleared.')}</remarks></detail>"
+        "</event>"
+    )
 
 
 def sensor_event(sensor_name: str, lat: float, lon: float, hae: float, status: str,

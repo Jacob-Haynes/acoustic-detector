@@ -112,10 +112,13 @@ class TakClient:
         if self._thread.is_alive():
             self._thread.join(timeout)
 
-    def send(self, xml: str) -> bool:
-        """Queue a marker. Returns False if the per-uid rate limit dropped it."""
+    def send(self, xml: str, force: bool = False) -> bool:
+        """Queue a marker. Returns False if the per-uid rate limit dropped it. force skips the limit:
+        only for the one-off removal of a marker (stale = now, then its delete)."""
         m = _UID_RE.search(xml)
-        if m and self.min_interval_s > 0:
+        if m and force:
+            self._last_by_uid[m.group(2)] = self._clock()
+        elif m and self.min_interval_s > 0:
             uid, now = m.group(2), self._clock()
             last = self._last_by_uid.get(uid)
             if last is not None and now - last < self.min_interval_s:

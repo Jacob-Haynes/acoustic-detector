@@ -12,7 +12,7 @@ from pathlib import Path
 
 import numpy as np
 
-from acoustic import cot, dsp, meshbus
+from acoustic import cot, demo, dsp, meshbus
 from acoustic.calibration import Calibration
 from acoustic.config import SAMPLE_RATE, WINDOW_SAMPLES, Settings
 from acoustic.detector import Hysteresis, fuse
@@ -29,7 +29,7 @@ ACTIVE_RESEND_S = 15.0
 
 class Engine:
     def __init__(self, settings: Settings, yamnet=None, cot_client=None, mesh=None, gemini=None,
-                 source=None):
+                 source=None, speaker=None):
         self.s = settings
         self.yamnet = yamnet
         self.cot = cot_client
@@ -65,6 +65,15 @@ class Engine:
         self._peak = 0.0
         self._last_active_send = 0.0
         self._log_path = Path(settings.data_dir) / "detections.jsonl"
+
+        # step-by-step demo (DEMO-TRIGGER-CONTRACT.md)
+        self.speaker = speaker if speaker is not None else demo.Speaker(settings.demo_speaker)
+        self._signature: np.ndarray | None = None
+        self._inject: dict | None = None          # drone-sound: {"sig", "pos"} mixed into feed()
+        self._demo_until: dict[str, float] = {}   # scenario id -> planned end (epoch)
+        self._demo_tail_until = 0.0               # a detection starting before this is the demo's
+        self._episode_sim = False                 # the current detection was started by the demo
+        self._sim_cot_sent = False                # a demo UAV marker is (maybe) on the map
         if self.gemini is not None:
             self.gemini.on_result = self._on_gemini
 
@@ -74,6 +83,16 @@ class Engine:
     def feed(self, block: np.ndarray):
         block = np.asarray(block, dtype=np.float32)
         n = len(block)
+        inj = self._inject
+        if inj is not None and n:
+            chunk = inj["sig"][inj["pos"]:inj["pos"] + n]
+            mixed = block.copy()
+            mixed[:len(chunk)] += chunk
+            block = np.clip(mixed, -1.0, 1.0)
+            inj["pos"] += n
+            if inj["pos"] >= len(inj["sig"]) and self._inject is inj:
+                self._inject = None                       # signature played out
+                self._demo_tail_until = time.time() + demo.TAIL_S
         if n:
             self._peak = max(float(np.max(np.abs(block))), self._peak * 0.9)
         with self._lock:
@@ -148,7 +167,14 @@ class Engine:
             details["yamnet_top"] = yres.top[0][0]
         if self.source is not None and getattr(self.source, "kind", "") == "simulate":
             details["sim_truth"] = self.source.truth
+        if self._inject is not None:
+            details["sim_truth"] = "drone (demo)"
+        prev_alert = self.hyst.last_alert_ts
         event = self.hyst.update(raw, now=now, details=details)
+        if event is not None and event.kind in ("detect", "suppressed"):
+            self._episode_sim = self._demo_running()
+            if self._episode_sim:
+                self.hyst.last_alert_ts = prev_alert   # a demo alert never starts the real cooldown
 
         state = {
             "ts": now,
@@ -171,7 +197,15 @@ class Engine:
 
     @property
     def source_kind(self) -> str:
+        """The label on outputs: "simulate" (SIMULATED: / [SIM]) for anything the demo caused."""
+        if self.demo_labelled:
+            return "simulate"
         return getattr(self.source, "kind", "") or ""
+
+    @property
+    def demo_labelled(self) -> bool:
+        """A demo scenario is running, or the current detection came from one."""
+        return self._episode_sim or self._demo_running()
 
     @property
     def _parent_uid(self) -> str | None:
@@ -181,6 +215,8 @@ class Engine:
 
     def _handle_event(self, event):
         entry = event.as_dict()
+        if self._episode_sim:
+            entry["sim"] = True
         self._append_log(entry)
         if event.kind == "detect":
             logger.warning("DRONE DETECTED conf %.2f f0 %.0f Hz", event.confidence, event.details.get("f0_hz", 0))
@@ -197,6 +233,7 @@ class Engine:
             if self.mesh is not None and self.s.mesh_enabled and self.s.mesh_clear_msg:
                 self.mesh.send(meshbus.clear_text(self.s.sensor_name, event.details.get("peak", 0),
                                                   self.source_kind))
+            self._episode_sim = False
 
     def _append_log(self, entry: dict):
         self.log.appendleft(entry)
@@ -214,10 +251,12 @@ class Engine:
             return
         self._last_active_send = time.time()
         src = self.source_kind
+        if self._episode_sim:
+            self._sim_cot_sent = True
         self.cot.send(cot.detection_event(self.s.sensor_name, self.s.sensor_lat, self.s.sensor_lon,
                                           self.s.sensor_hae, confidence, self.s.detect_radius_m,
                                           self.s.cot_affiliation, f0, source=src,
-                                          parent_uid=self._parent_uid))
+                                          parent_uid=self._parent_uid, demo=self._episode_sim))
 
     def _periodic_outputs(self, now: float):
         if self.cot is None or not self.s.has_position:
@@ -290,6 +329,119 @@ class Engine:
         self._append_log(entry)
 
     # ------------------------------------------------------------------------------------------
+    # step-by-step demo (ui-kit/DEMO-TRIGGER-CONTRACT.md)
+    # ------------------------------------------------------------------------------------------
+    def demo_available(self) -> list[str]:
+        kind = getattr(self.source, "kind", "none") if self.source is not None else "none"
+        ids = ["drone-sound"]
+        if kind == "mic" and self.speaker.available:   # the real mic has to hear the speaker
+            ids.append("play-clip")
+        return ids
+
+    def demo_active(self) -> list[str]:
+        now = time.time()
+        ids = []
+        if self._inject is not None:
+            if now > self._demo_until.get("drone-sound", now) + 10.0:
+                self._inject = None                        # no audio is flowing: give up on it
+            else:
+                ids.append("drone-sound")
+        if self._demo_until.get("play-clip", 0.0) > now:
+            ids.append("play-clip")
+        return ids
+
+    def _demo_running(self) -> bool:
+        return bool(self.demo_active()) or time.time() < self._demo_tail_until
+
+    def demo_scenarios(self) -> dict:
+        return {"mode": self.s.demo_mode,
+                "scenarios": [{"id": i, **demo.SCENARIOS[i]} for i in self.demo_available()],
+                "active": self.demo_active()}
+
+    def demo_trigger(self, sid: str) -> dict:
+        if sid not in demo.SCENARIOS:
+            raise KeyError(sid)
+        if sid not in self.demo_available():
+            raise ValueError("play-clip needs a speaker on this unit and the microphone as input")
+        now, dur = time.time(), demo.SCENARIOS[sid]["duration_s"]
+        sig = self._demo_sound(dur)
+        if sid == "drone-sound":
+            # a noisy room would drown it: keep the close-in part well above what the mic hears now
+            room = self.tail(1.0)
+            scale = demo.room_scale(float(np.sqrt(np.mean(room ** 2))) if len(room) else 0.0, sig)
+            self._inject = {"sig": sig * scale, "pos": 0}     # restarts if already running
+        elif not self.speaker.play(sig):
+            raise RuntimeError("the speaker did not play")
+        self._demo_until[sid] = now + dur
+        self._demo_tail_until = max(self._demo_tail_until, now + dur + demo.TAIL_S)
+        logger.info("Demo scenario %s started (%.0f s), outputs marked SIMULATED", sid, dur)
+        self._append_log({"kind": "demo", "ts": now, "confidence": 0.0, "id": sid,
+                          "label": demo.SCENARIOS[sid]["label"]})
+        return {"ok": True, "id": sid, "until": round(now + dur, 3)}
+
+    def _demo_sound(self, seconds: float) -> np.ndarray:
+        """The taught drone if there is one (so the "My drone" score matches too), else synthetic."""
+        if self.calibration.enrolled:
+            try:
+                sig = demo.taught_signature(self.calibration.dir / "drone", seconds)
+                if sig is not None:
+                    return sig
+            except Exception:  # noqa: BLE001
+                logger.exception("Could not build the demo sound from the taught clips")
+        if self._signature is None:
+            self._signature = demo.drone_signature(seconds)
+        return self._signature
+
+    def demo_clear(self) -> dict:
+        """Stop every scenario and take the demo's marker off the map. Real detections are untouched:
+        they never use the demo uid, and the detector state is only reset for a demo detection."""
+        active = self.demo_active()
+        was_demo = bool(active) or self._episode_sim or time.time() < self._demo_tail_until
+        self._inject = None
+        if "play-clip" in active:
+            self.speaker.stop()
+        self._demo_until.clear()
+        if was_demo:
+            # the last second of demo sound is still in the analysis window: keep labelling briefly
+            self._demo_tail_until = time.time() + demo.TAIL_S
+        if self._episode_sim:
+            h = self.hyst
+            peak = h.peak
+            h.active, h._above, h._below, h.smoothed = False, 0, 0, 0.0
+            self._append_log({"kind": "clear", "ts": time.time(), "confidence": 0.0, "peak": round(peak, 3),
+                              "sim": True, "demo_cleared": True})
+            self._episode_sim = False
+        elif was_demo and not self.hyst.active:
+            self.hyst.smoothed, self.hyst._above = 0.0, 0     # don't let the leftover sound trigger
+        removed = self._remove_demo_marker()
+        if active:
+            logger.info("Demo cleared: %s", ", ".join(active))
+        if active or removed:
+            self._append_log({"kind": "demo_clear", "ts": time.time(), "confidence": 0.0, "cleared": len(active),
+                              "marker_removed": removed})
+        return {"ok": True, "cleared": len(active), "marker_removed": removed}
+
+    def _remove_demo_marker(self) -> bool:
+        if not self._sim_cot_sent or self.cot is None or not self.s.has_position:
+            return False
+        self._sim_cot_sent = False
+        s, now = self.s, time.time()
+        uid = cot.detection_uid(s.sensor_name, demo=True)
+        sends = [
+            cot.detection_event(s.sensor_name, s.sensor_lat, s.sensor_lon, s.sensor_hae, 0.0, s.detect_radius_m,
+                                s.cot_affiliation, source="simulate", parent_uid=self._parent_uid, demo=True,
+                                stale_s=0.0, note="Demo cleared.", now=now),
+            cot.delete_event(uid, cot.detection_type(s.cot_affiliation), s.sensor_lat, s.sensor_lon,
+                             source="simulate", now=now),
+        ]
+        registration = getattr(self.cot, "registration", None)
+        if callable(registration):
+            sends.append(registration(now=now))              # OTS marks us disconnected on a t-x-d-d
+        for xml in sends:
+            self.cot.send(xml, force=True)
+        return True
+
+    # ------------------------------------------------------------------------------------------
     # test alert + lifecycle
     # ------------------------------------------------------------------------------------------
     def test_alert(self) -> dict:
@@ -351,8 +503,11 @@ class Engine:
         if self.yamnet_unavailable:
             status = "degraded" if status == "ok" else status
             notes.append(UNAVAILABLE)             # prop-comb detection only
+        active = self.demo_active()
+        if active:
+            notes.append("demo: " + ", ".join(active))
         hb = {"host": meshbus.station_host(), "url": meshbus.advertised_url(self.s.web_port, self.s.public_url),
-              "mode": mode, "status": status}
+              "mode": mode, "status": status, "demo_mode": self.s.demo_mode, "demo_active": active}
         if notes:
             hb["detail"] = "; ".join(notes)
         return hb
@@ -400,4 +555,7 @@ class Engine:
             },
             "recording": self.recording_status(),
             "last_record": self.last_record,
+            "demo": {**self.demo_scenarios(), "until": {k: round(v, 3) for k, v in self._demo_until.items()
+                                                        if k in self.demo_active()},
+                     "labelled": self.demo_labelled},
         }

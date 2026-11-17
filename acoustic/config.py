@@ -109,6 +109,11 @@ class Settings:
     alert_cooldown_s: float = 60.0
     min_level_dbfs: float = -65.0       # quieter than this is treated as silence
 
+    # ui-kit/DEMO-TRIGGER-CONTRACT.md. continuous: --simulate loops its drone pass as before.
+    # on_demand: nothing simulated happens until the presenter fires a scenario.
+    demo_mode: str = "continuous"
+    demo_speaker: str = "auto"          # play-clip output: auto (first non-HDMI), off, index or name
+
     @classmethod
     def from_env(cls) -> "Settings":
         s = cls()
@@ -152,6 +157,9 @@ class Settings:
         s.detect_on = _env_float("DETECT_ON", s.detect_on)
         s.detect_off = _env_float("DETECT_OFF", s.detect_off)
         s.alert_cooldown_s = _env_float("ALERT_COOLDOWN", s.alert_cooldown_s)
+        mode = (_env("DEMO_MODE", s.demo_mode) or "").lower().replace("-", "_")
+        s.demo_mode = mode if mode in ("continuous", "on_demand") else "continuous"
+        s.demo_speaker = _env("DEMO_SPEAKER", s.demo_speaker)
         return s
 
     @property

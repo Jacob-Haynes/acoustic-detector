@@ -18,6 +18,7 @@
   .isr-card.alert .meter .fill { background: var(--accent); }
   .meter .tick { position: absolute; top: -1px; bottom: -1px; width: 1px; background: var(--text); }
   .btns { display: flex; flex-wrap: wrap; gap: 10px; }
+  .btns .contents { display: contents; }
   .progress { height: 2px; margin-top: 10px; background: var(--panel-2); overflow: hidden; }
   .progress div { height: 100%; width: 0; background: var(--accent); }
   canvas { display: block; width: 100%; background: var(--bg); }
@@ -81,6 +82,11 @@
       <section class="isr-card">
         <h2>Recent detections</h2>
         <ul class="isr-list" id="log"></ul>
+      </section>
+      <section class="isr-card" id="demo">
+        <div class="head"><h2>Demo</h2><span class="isr-tag sim" id="demotag" style="display:none">SIM</span></div>
+        <p class="isr-muted" id="demoinfo">Loading</p>
+        <div class="btns"><span class="contents" id="demobtns"></span><button class="isr-btn" id="demo-clear">Clear demo</button></div>
       </section>
     </div>
   </div>
@@ -253,9 +259,11 @@ function renderStatus(s) {
   $("tick-on").style.left = (thresholds.on * 100) + "%";
   const src = s.source;
   const tag = $("srctag");
-  tag.className = "isr-tag " + (src.kind === "simulate" ? "sim" : src.kind === "file" ? "rec" : "live");
-  tag.textContent = src.kind === "simulate" ? "SIM" : src.kind === "file" ? "REC" : "LIVE";
-  tag.title = src.description;
+  const sim = src.kind === "simulate" || (s.demo && s.demo.labelled);   // a demo scenario is SIM too
+  tag.className = "isr-tag " + (sim ? "sim" : src.kind === "file" ? "rec" : "live");
+  tag.textContent = sim ? "SIM" : src.kind === "file" ? "REC" : "LIVE";
+  tag.title = src.kind !== "simulate" && sim ? "Demo running: alerts are marked SIMULATED" : src.description;
+  if (s.demo) renderDemo(s.demo, src);
   updatePill(s);
 
   // Banner only for something to fix now.
@@ -299,8 +307,36 @@ function renderStatus(s) {
   }
 }
 
+// ---------- demo (step by step: DEMO_MODE=on_demand puts this card on the first screen) ----------
+let demoKey = "";
+function renderDemo(d, src) {
+  const card = $("demo"), home = d.mode === "on_demand" ? $("now") : $("log").closest("section");
+  if (card.previousElementSibling !== home) home.after(card);
+  const key = d.scenarios.map(x => x.id).join(",");
+  if (key !== demoKey) {
+    demoKey = key;
+    $("demobtns").innerHTML = d.scenarios.map(x =>
+      `<button class="isr-btn" data-id="${esc(x.id)}" title="${esc(x.hint)}">${esc(x.label)}</button>`).join("");
+    $("demobtns").querySelectorAll("button").forEach(b => b.onclick = () =>
+      post("/api/demo/trigger", { id: b.dataset.id }).catch(() => say("demoinfo", "That scenario did not start.")));
+  }
+  const now = Date.now() / 1000;
+  const running = d.active.map(id => {
+    const sc = d.scenarios.find(x => x.id === id), left = Math.max(0, Math.round((d.until[id] || now) - now));
+    return `${sc ? sc.label : id}, ${left} s left`;
+  });
+  $("demotag").style.display = d.labelled ? "" : "none";   // the kit styles .isr-tag, so not [hidden]
+  $("demoinfo").textContent = running.length ? `Running: ${running.join("; ")}. Its alerts are marked SIMULATED.`
+    : d.labelled ? "Demo detection still showing. Clear demo removes it."
+    : (d.mode === "on_demand" ? "Nothing simulated runs on its own. " : "")
+      + "Each scenario runs once, for about 20 s, through the real detector."
+      + (src.kind === "mic" && !d.scenarios.some(x => x.id === "play-clip") ? " No speaker found, so there is no clip to play." : "");
+}
+$("demo-clear").onclick = () => post("/api/demo/clear").then(r => say("demoinfo", r.cleared || r.marker_removed
+  ? "Demo cleared." : "Nothing to clear.")).catch(() => say("demoinfo", "Clear demo failed."));
+
 const SHOWN = { detect: ["Drone", true], suppressed: ["Drone again", true], clear: ["Cleared"], gemini: ["Gemini"],
-                enrolled: ["Taught"], test: ["Test alert"] };
+                enrolled: ["Taught"], test: ["Test alert"], demo: ["Demo"], demo_clear: ["Demo cleared"] };
 function renderLog(log) {
   if (!log) return;
   const rows = log.filter(e => SHOWN[e.kind]).slice(0, 8).map(e => {
@@ -311,6 +347,9 @@ function renderLog(log) {
     else if (e.kind === "gemini") detail = e.ok ? `${e.drone_audible ? "drone" : "no drone"}, ${esc(e.best_guess)}` : "no answer";
     else if (e.kind === "enrolled") detail = e.label === "drone" ? "drone clip" : "background clip";
     else if (e.kind === "test") detail = "sent to TAK and mesh";
+    else if (e.kind === "demo") detail = esc(e.label || e.id);
+    else if (e.kind === "demo_clear") detail = [e.cleared ? `${e.cleared} stopped` : "", e.marker_removed ? "marker removed" : ""].filter(Boolean).join(", ");
+    if (e.sim) detail += ` <span class="isr-tag sim">SIM</span>`;
     return `<li><span class="t isr-mono">${fmtTime(e.ts)}</span><span class="w">${drone ? `<span class="aff ${affClass()}"></span>` : ""}${word}</span><span class="isr-muted">${detail}</span></li>`;
   });
   $("log").innerHTML = rows.join("") || `<li class="isr-muted">Nothing heard yet.</li>`;

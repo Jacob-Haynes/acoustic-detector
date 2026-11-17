@@ -91,7 +91,7 @@ def main(argv=None):
     from acoustic.sources import FileSource, MicSource, SimSource
 
     if args.simulate:
-        source = SimSource()
+        source = SimSource(quiet=s.demo_mode == "on_demand")
     elif args.file:
         source = FileSource(args.file, loop=args.loop)
     else:
@@ -135,9 +135,9 @@ def main(argv=None):
     from acoustic.web import app as web
 
     web.engine = engine
-    log.info("Acoustic detector %s: source=%s, yamnet=%s, gemini=%s, UI http://0.0.0.0:%d",
+    log.info("Acoustic detector %s: source=%s, yamnet=%s, gemini=%s, demo=%s, UI http://0.0.0.0:%d",
              s.sensor_name, source.description, bool(yamnet and yamnet.available),
-             s.gemini_model if gemini.enabled else "off", s.web_port)
+             s.gemini_model if gemini.enabled else "off", s.demo_mode, s.web_port)
 
     async def serve():
         server = uvicorn.Server(uvicorn.Config(web.app, host="0.0.0.0", port=s.web_port,

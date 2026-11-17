@@ -57,13 +57,17 @@ def mesh_tag(source_kind: str | None) -> str:
 
 
 def heartbeat_payload(host: str, url: str, mode: str, status: str, ts: float | None = None,
-                      detail: str | None = None) -> dict:
+                      detail: str | None = None, demo_mode: str | None = None,
+                      demo_active: list | None = None) -> dict:
     """isrkit heartbeat contract: {"tool","host","url","mode","status","ts"}, plus an optional
     short "detail" string the launcher shows under the row (e.g. why we're degraded)."""
     hb = {"tool": SOURCE, "host": host, "url": url, "mode": mode, "status": status,
           "ts": int(time.time() if ts is None else ts)}
     if detail:
         hb["detail"] = detail[:120]
+    if demo_mode is not None:                 # DEMO-TRIGGER-CONTRACT: the launcher shows these
+        hb["demo_mode"] = demo_mode
+        hb["demo_active"] = list(demo_active or [])
     return hb
 
 

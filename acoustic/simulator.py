@@ -19,28 +19,39 @@ SCENARIO = [
 ]
 
 
+# DEMO_MODE=on_demand: --simulate plays only the quiet field, so nothing is detected on its own.
+QUIET = [("background", 60.0)]
+
+
 class Synth:
-    def __init__(self, seed: int = 1, sr: int = SAMPLE_RATE):
+    noise_level = 0.004                  # quiet field background
+
+    def __init__(self, seed: int = 1, sr: int = SAMPLE_RATE, scenario: list | None = None):
         self.sr = sr
+        self.scenario = SCENARIO if scenario is None else scenario
         self.rng = np.random.default_rng(seed)
         self.t = 0                       # samples generated so far
         self._phases = np.zeros(256)     # oscillator phases, persistent across blocks
         self._pink = np.zeros(3)
-        self.total = sum(d for _, d in SCENARIO)
+        self.total = sum(d for _, d in self.scenario)
 
     # -- scenario bookkeeping ------------------------------------------------------------------
     def phase_at(self, seconds: float) -> tuple[str, float, float]:
         """(label, seconds into phase, phase length) for a time in the loop."""
         s = seconds % self.total
-        for label, dur in SCENARIO:
+        for label, dur in self.scenario:
             if s < dur:
                 return label, s, dur
             s -= dur
-        return SCENARIO[-1][0], 0.0, SCENARIO[-1][1]
+        return self.scenario[-1][0], 0.0, self.scenario[-1][1]
 
     @property
     def current_label(self) -> str:
         return self.phase_at(self.t / self.sr)[0]
+
+    def drone_distance(self, frac: float) -> float:
+        """Metres from the mic, frac = 0..1 through the drone phase: 150 m -> 8 m -> 150 m."""
+        return 8.0 + 142.0 * abs(2 * frac - 1) ** 1.3
 
     # -- generators ----------------------------------------------------------------------------
     def _noise(self, n: int, level: float) -> np.ndarray:
@@ -74,11 +85,9 @@ class Synth:
 
     def block(self, n: int) -> np.ndarray:
         label, into, dur = self.phase_at(self.t / self.sr)
-        x = self._noise(n, 0.004)                                  # quiet field background
+        x = self._noise(n, self.noise_level)
         if label == "drone":
-            # approach then recede: distance 150 m -> 8 m -> 150 m
-            frac = into / dur
-            dist = 8.0 + 142.0 * abs(2 * frac - 1) ** 1.3
+            dist = self.drone_distance(into / dur)                 # approach then recede
             gain = min(1.0, 6.0 / dist) * 0.25
             throttle = 1.0 + 0.06 * np.sin(2 * np.pi * self.t / self.sr / 3.1)
             base = [372.0, 381.0, 366.0, 377.0]                    # four motors, slightly unequal

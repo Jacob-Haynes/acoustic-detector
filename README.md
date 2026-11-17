@@ -38,7 +38,9 @@ On a detection:
 - **Labelling**: in `--simulate` the CoT remarks (detection and sensor marker) start with
   `SIMULATED: ` and mesh texts start with `[SIM] `; in `--file` replay they start with `RECORDED: `
   and `[REC] `. Live microphone input has no prefix. That includes the office demo, where drone
-  audio played through a speaker is a real acoustic detection.
+  audio played through your own speaker is a real acoustic detection. Anything a **Demo**
+  scenario causes is labelled `SIMULATED: ` / `[SIM] ` too, even on the live mic (see
+  [Step-by-step demo](#step-by-step-demo-demo_mode)).
 - **Rate limits**: at most one mesh text per 30 s, and at most one CoT event per 5 s per uid.
   Anything over is dropped and logged.
 - **Gemini** (if enabled): the last 4 s are sent for a second opinion, which is shown in its own panel.
@@ -46,7 +48,8 @@ On a detection:
 
 Every 10 s a retained heartbeat goes to `isrkit/heartbeat/acoustic-detector`
 (`{"tool","host","url","mode","status","ts"}`, where mode is `cpu`, `gemini`, `simulate` or
-`replay`, and status is `ok`, `degraded` or `error`). `host` is `ISR_HOST` if set, otherwise
+`replay`, and status is `ok`, `degraded` or `error`), plus `"demo_mode"` and `"demo_active"`
+(scenario ids); while a scenario runs, `detail` also says `demo: <id>`. `host` is `ISR_HOST` if set, otherwise
 the lowercased short hostname. A clean exit leaves `stopped`. A crash
 leaves `error` through the MQTT last-will. The Pi launcher uses this to list the tool wherever
 it runs.
@@ -294,6 +297,33 @@ Tips: a speaker playing at moderate volume 1–2 m away reads like a real quad t
 Too loud a speaker clips the mic (the peak meter turns red). Small Bluetooth speakers can't
 reproduce much below ~150 Hz, which is fine for prop tones.
 
+## Step-by-step demo (DEMO_MODE)
+
+Implements [`ui-kit/DEMO-TRIGGER-CONTRACT.md`](../ui-kit/DEMO-TRIGGER-CONTRACT.md): the presenter
+fires each event, so the room sees cause and effect on ATAK and the mesh.
+
+- `DEMO_MODE=continuous` (default) behaves exactly as before: `--simulate` loops its drone pass.
+- `DEMO_MODE=on_demand`: nothing simulated happens on its own (`--simulate` plays the quiet field
+  only). The real mic stays live, and the **Demo** card moves to the first screen.
+
+Scenarios (one button each on the **Demo** card; also `POST /api/demo/trigger {"id": …}`):
+
+| id | What happens |
+|---|---|
+| `drone-sound` | A drone sound is mixed into the live input for 20 s: it closes in 4 s, holds, and leaves in the last 4 s. It goes through the real waterfall, detector, CoT and mesh, so the verdict, the alert, the mesh text and the ATAK marker all fire as for a real drone. The sound is the drone taught on this unit (the rotor-tone stretches of its clips) if there is one, so *My drone* matches too; otherwise a synthetic quad. It is made louder in a noisy room so it still stands out. |
+| `play-clip` | Plays the same sound from a speaker on this unit for 20 s, so the real mic hears it. Offered only when the input is the microphone and there is a speaker output (`DEMO_SPEAKER`: `auto` picks the first output that isn't HDMI, or give `off`, an index or a name). |
+
+While a scenario runs, and for 2 s after, every output it causes is labelled `SIMULATED: ` /
+`[SIM] ` and shows a SIM tag on the page. Its ATAK marker has its own uid,
+`ACOUSTIC-<SENSOR_NAME>-UAV-SIM`, so it can never replace or remove a real one. A demo detection
+never starts the real 60 s alert cooldown, so a real drone straight afterwards still alerts, and
+the demo can be run again at once (the mesh's 30 s limit still applies).
+
+**Clear demo** (`POST /api/demo/clear`) stops every scenario, ends a demo detection at once and
+takes the demo marker off the map: it is re-sent with stale = now, then a `t-x-d-d`
+`__forcedelete` follows, then the registration SA (OTS marks the sender disconnected after a
+delete). It never touches a real detection. `GET /api/demo/scenarios` lists what this unit offers.
+
 ## Tuning knobs
 
 | Env var | Default | Effect |
@@ -380,7 +410,8 @@ All settings live in `/etc/acoustic-detector.env`. See
 [`deploy/acoustic-detector.env.example`](deploy/acoustic-detector.env.example). The most important
 ones are `SENSOR_NAME`, `SENSOR_LAT`/`SENSOR_LON` (the shared OP position; without them, or
 at 0,0, no ATAK markers are sent; `--simulate` alone falls back to a demo position), `ISR_HOST`,
-`DETECT_ON`/`DETECT_OFF`/`ALERT_COOLDOWN`, `TAK_HOST`/`TAK_PORT`, `MQTT_*` and `MESH_TO`.
+`DETECT_ON`/`DETECT_OFF`/`ALERT_COOLDOWN`, `TAK_HOST`/`TAK_PORT`, `MQTT_*`, `MESH_TO` and
+`DEMO_MODE`/`DEMO_SPEAKER`.
 
 ## Layout
 
@@ -393,6 +424,7 @@ acoustic/            python package (python -m acoustic)
   engine.py          audio ring buffer, analysis loop, outputs, recording
   sources.py         USB mic (sounddevice), file replay, simulator source
   simulator.py       synthetic soundscape
+  demo.py            step-by-step demo scenarios: drone sound, speaker playback
   cot.py meshbus.py gemini.py   outputs (tak_client.py: registered TAK connection)
   web/               FastAPI app + static UI
 deploy/              install.sh, start.sh, systemd unit, env example

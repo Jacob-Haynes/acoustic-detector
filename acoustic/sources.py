@@ -24,11 +24,12 @@ Feed = Callable[[np.ndarray], None]
 class SimSource:
     kind = "simulate"
 
-    def __init__(self, seed: int = 1):
-        from acoustic.simulator import Synth
+    def __init__(self, seed: int = 1, quiet: bool = False):
+        from acoustic.simulator import QUIET, Synth
 
-        self.synth = Synth(seed=seed)
-        self.description = "synthetic soundscape"
+        # quiet (DEMO_MODE=on_demand): background only; the presenter fires the drone from Demo.
+        self.synth = Synth(seed=seed, scenario=QUIET if quiet else None)
+        self.description = "synthetic soundscape" + (" (quiet, demo on demand)" if quiet else "")
 
     @property
     def truth(self) -> str:

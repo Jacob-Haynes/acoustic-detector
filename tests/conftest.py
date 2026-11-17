@@ -40,7 +40,7 @@ class FakeCot:
     def __init__(self):
         self.messages = []
 
-    def send(self, xml):
+    def send(self, xml, force=False):
         self.messages.append(xml)
         self.sent += 1
 

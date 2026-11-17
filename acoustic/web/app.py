@@ -30,6 +30,11 @@ class DeviceRequest(BaseModel):
     device: int | str
 
 
+class DemoTrigger(BaseModel):
+    model_config = {"extra": "allow"}     # contract: per-scenario options may follow the id
+    id: str
+
+
 class RecordRequest(BaseModel):
     label: str = "drone"
     seconds: float = 5.0
@@ -165,6 +170,28 @@ async def gemini():
     if result == "disabled":
         raise HTTPException(400, "Gemini is off (no GEMINI_API_KEY)")
     return {"result": result}
+
+
+# Step-by-step demo: ui-kit/DEMO-TRIGGER-CONTRACT.md
+@app.get("/api/demo/scenarios")
+async def demo_scenarios():
+    return _engine().demo_scenarios()
+
+
+@app.post("/api/demo/trigger")
+async def demo_trigger(req: DemoTrigger):
+    e = _engine()
+    try:
+        return await asyncio.to_thread(e.demo_trigger, req.id)
+    except KeyError as err:
+        raise HTTPException(404, f"no demo scenario {req.id!r}") from err
+    except (ValueError, RuntimeError) as err:
+        raise HTTPException(409, str(err)) from err
+
+
+@app.post("/api/demo/clear")
+async def demo_clear():
+    return await asyncio.to_thread(_engine().demo_clear)
 
 
 @app.post("/api/test-alert")
