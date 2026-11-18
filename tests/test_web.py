@@ -20,11 +20,11 @@ def test_index(client):
     assert r.status_code == 200 and "<h1>Acoustic</h1>" in r.text
 
 
-# sha256 of ui-kit v3 (isr-ui.css, isr-ui.js, fonts/). The served copies must be byte-identical to the
+# sha256 of ui-kit v4 (isr-ui.css, isr-ui.js, fonts/). The served copies must be byte-identical to the
 # kit: change the kit at its source and re-copy, never edit the vendored files.
 KIT_SHA256 = {
-    "isr-ui.css": "287c3df0938d25c25b04b751007095c3cf08e1df0e2689d3dd8df8b3e9eb832c",
-    "isr-ui.js": "79a61cb2a427302e45b62cbebe2d022eff2dcd0549df5edea77b13a6b478fe7d",
+    "isr-ui.css": "59982e401316f8ef3032df561974c542119bbbf606998af97f92fff656ddab1e",
+    "isr-ui.js": "109cef714b1f4dfba0159c0f5cab04e4cd2338eea61e41705063e43f4e9ea296",
     "fonts/OFL-BarlowCondensed.txt": "186d750eb496a4c17a76385f82be6aea2ac1cf2de074a811d63786cf374ea73f",
     "fonts/OFL-IBMPlexMono.txt": "7e6b2818edbd8f6a01ae80641cc8f16a51080d08fb4e532be3a0b6f74adb07da",
     "fonts/barlow-condensed-500.woff2": "31ff5e6e96a096fde4d78bc838719e69b093db2d0b062b96e423c065a6d1b2b1",
@@ -38,11 +38,11 @@ def test_page_uses_isr_kit(client):
     import hashlib
 
     html = client.get("/").text
-    assert '<link rel="stylesheet" href="isr-ui.css?v=3">' in html       # kit version, busts old caches
-    assert '<script src="isr-ui.js?v=3"></script>' in html
+    assert '<link rel="stylesheet" href="isr-ui.css?v=4">' in html       # kit version, busts old caches
+    assert '<script src="isr-ui.js?v=4"></script>' in html
     assert client.get("/").headers["cache-control"] == "no-cache"
     for name in ("isr-ui.css", "isr-ui.js"):                             # ?v= matches the file's own vN
-        assert client.get("/" + name).text.startswith("/* isr-ui." + name.split(".")[1] + " v3")
+        assert client.get("/" + name).text.startswith("/* isr-ui." + name.split(".")[1] + " v4")
     assert html.index("isr-ui.css") < html.index("<style>")      # kit loads before page CSS
     assert 'id="isr-status"' in html and 'id="isr-kit-link"' in html
     assert html.count("isr-btn primary") == 1
