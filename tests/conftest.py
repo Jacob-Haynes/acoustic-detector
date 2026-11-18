@@ -1,0 +1,58 @@
+import numpy as np
+import pytest
+
+from acoustic.config import SAMPLE_RATE, Settings
+
+SR = SAMPLE_RATE
+
+
+def tone_comb(f0=380.0, seconds=1.0, harmonics=10, level=0.05, jitter=0.0, seed=0):
+    rng = np.random.default_rng(seed)
+    t = np.arange(int(seconds * SR)) / SR
+    x = np.zeros_like(t)
+    # true FM: instantaneous pitch f0 * (1 + jitter * sin(2*pi*0.7*t))
+    fm = 0.7
+    phase = 2 * np.pi * f0 * (t - jitter / (2 * np.pi * fm) * np.cos(2 * np.pi * fm * t))
+    for k in range(1, harmonics + 1):
+        if k * f0 < SR / 2 - 100:
+            x += np.sin(k * phase) / k ** 0.8
+    x = level * x / np.max(np.abs(x)) + rng.standard_normal(len(t)) * level * 0.05
+    return x.astype(np.float32)
+
+
+def noise(seconds=1.0, level=0.02, seed=1):
+    return (np.random.default_rng(seed).standard_normal(int(seconds * SR)) * level).astype(np.float32)
+
+
+@pytest.fixture
+def settings(tmp_path):
+    s = Settings()
+    s.data_dir = tmp_path
+    s.sensor_lat, s.sensor_lon = 52.0, -1.0
+    s.use_yamnet = False
+    return s
+
+
+class FakeCot:
+    connected = True
+    sent = 0
+
+    def __init__(self):
+        self.messages = []
+
+    def send(self, xml, force=False):
+        self.messages.append(xml)
+        self.sent += 1
+
+
+class FakeMesh:
+    connected = True
+    sent = 0
+
+    def __init__(self):
+        self.texts = []
+
+    def send(self, text):
+        self.texts.append(text)
+        self.sent += 1
+        return True

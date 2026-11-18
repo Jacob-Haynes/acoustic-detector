@@ -1,0 +1,20 @@
+[Unit]
+Description=Acoustic drone detector (USB microphone)
+After=network-online.target sound.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=acoustic
+Group=acoustic
+SupplementaryGroups=audio
+WorkingDirectory=/opt/acoustic-detector
+EnvironmentFile=-/etc/acoustic-detector.env
+Environment=PYTHONUNBUFFERED=1
+Environment=DATA_DIR=/var/lib/acoustic-detector
+ExecStart=/opt/acoustic-detector/deploy/start.sh
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
