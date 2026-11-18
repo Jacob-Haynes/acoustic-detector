@@ -74,6 +74,11 @@ class Engine:
         self._demo_tail_until = 0.0               # a detection starting before this is the demo's
         self._episode_sim = False                 # the current detection was started by the demo
         self._sim_cot_sent = False                # a demo UAV marker is (maybe) on the map
+        # Alert uids sent labelled SIMULATED, kept across restarts so a later run can take them off
+        # the map (e.g. continuous -> on_demand). None in the file's place: history unknown.
+        self._sim_ledger = Path(settings.data_dir) / "sim_markers.json"
+        self._sim_uids: set[str] = set()
+        self._sim_history_known = self._load_sim_ledger()
         if self.gemini is not None:
             self.gemini.on_result = self._on_gemini
 
@@ -253,6 +258,10 @@ class Engine:
         src = self.source_kind
         if self._episode_sim:
             self._sim_cot_sent = True
+        uid = cot.detection_uid(self.s.sensor_name, demo=self._episode_sim)
+        if src == "simulate" and uid not in self._sim_uids:
+            self._sim_uids.add(uid)
+            self._save_sim_ledger()
         self.cot.send(cot.detection_event(self.s.sensor_name, self.s.sensor_lat, self.s.sensor_lon,
                                           self.s.sensor_hae, confidence, self.s.detect_radius_m,
                                           self.s.cot_affiliation, f0, source=src,
@@ -425,21 +434,62 @@ class Engine:
         if not self._sim_cot_sent or self.cot is None or not self.s.has_position:
             return False
         self._sim_cot_sent = False
+        return bool(self._remove_markers([cot.detection_uid(self.s.sensor_name, demo=True)], "Demo cleared."))
+
+    def remove_sim_markers(self, startup: bool = False) -> list[str]:
+        """Take simulated alert markers off the map: on shutdown, and on start in on_demand mode.
+        Real (live mic) alerts and the sensor's own markers are left alone. On a start with no
+        record of what earlier runs sent, both alert uids are removed: history unknown."""
+        if self.cot is None or not self.s.has_position:
+            return []
+        uids = set(self._sim_uids)
+        if startup and not self._sim_history_known:
+            uids |= {cot.detection_uid(self.s.sensor_name), cot.detection_uid(self.s.sensor_name, demo=True)}
+        if self.hyst.active and not self._episode_sim and self.source_kind != "simulate":
+            uids.discard(cot.detection_uid(self.s.sensor_name))      # a real detection showing now
+        done = self._remove_markers(sorted(uids), "Simulated alert removed.")
+        self._sim_history_known = True
+        if done:
+            logger.info("Removed simulated alert marker(s) %s from the map", ", ".join(done))
+        return done
+
+    def _remove_markers(self, uids: list[str], note: str) -> list[str]:
+        """Each uid: re-sent with stale = now (OTS keeps it otherwise), then a t-x-d-d __forcedelete
+        (ATAK drops it at once); then the registration SA once, since OTS marks us disconnected."""
+        if not uids or self.cot is None or not self.s.has_position:
+            return []
         s, now = self.s, time.time()
-        uid = cot.detection_uid(s.sensor_name, demo=True)
-        sends = [
-            cot.detection_event(s.sensor_name, s.sensor_lat, s.sensor_lon, s.sensor_hae, 0.0, s.detect_radius_m,
-                                s.cot_affiliation, source="simulate", parent_uid=self._parent_uid, demo=True,
-                                stale_s=0.0, note="Demo cleared.", now=now),
-            cot.delete_event(uid, cot.detection_type(s.cot_affiliation), s.sensor_lat, s.sensor_lon,
-                             source="simulate", now=now),
-        ]
+        sends = []
+        for uid in uids:
+            sim_uid = uid.endswith("-SIM")
+            sends.append(cot.detection_event(s.sensor_name, s.sensor_lat, s.sensor_lon, s.sensor_hae, 0.0,
+                                             s.detect_radius_m, s.cot_affiliation, source="simulate",
+                                             parent_uid=self._parent_uid, demo=sim_uid, stale_s=0.0, note=note,
+                                             now=now))
+            sends.append(cot.delete_event(uid, cot.detection_type(s.cot_affiliation), s.sensor_lat,
+                                          s.sensor_lon, source="simulate", now=now))
         registration = getattr(self.cot, "registration", None)
         if callable(registration):
-            sends.append(registration(now=now))              # OTS marks us disconnected on a t-x-d-d
+            sends.append(registration(now=now))
         for xml in sends:
             self.cot.send(xml, force=True)
-        return True
+        self._sim_uids -= set(uids)
+        self._save_sim_ledger()
+        return list(uids)
+
+    def _load_sim_ledger(self) -> bool:
+        try:
+            self._sim_uids = {str(u) for u in json.loads(self._sim_ledger.read_text())}
+            return True
+        except (OSError, ValueError, TypeError):
+            return False
+
+    def _save_sim_ledger(self):
+        try:
+            self._sim_ledger.parent.mkdir(parents=True, exist_ok=True)
+            self._sim_ledger.write_text(json.dumps(sorted(self._sim_uids)))
+        except OSError as e:
+            logger.debug("Could not write %s: %s", self._sim_ledger, e)
 
     # ------------------------------------------------------------------------------------------
     # test alert + lifecycle

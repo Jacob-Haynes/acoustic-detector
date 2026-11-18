@@ -128,6 +128,9 @@ def main(argv=None):
         log.warning("SENSOR_LAT/SENSOR_LON not set: ATAK markers will not be sent")
 
     engine = Engine(s, yamnet=yamnet, cot_client=cot_client, mesh=mesh, gemini=gemini, source=source).start()
+    if s.demo_mode == "on_demand":
+        # e.g. the Pi just switched from continuous: its simulated alert would sit on the map until stale
+        engine.remove_sim_markers(startup=True)            # queued; goes out after registration
     mesh.start_heartbeat(engine.heartbeat)
 
     import uvicorn
@@ -161,6 +164,9 @@ def main(argv=None):
     finally:
         log.info("Shutting down")
         engine.stop()
+        if cot_client and engine.remove_sim_markers():
+            if not cot_client.flush(5.0):
+                log.warning("TAK not reachable: simulated alert left to go stale on the map")
         if mesh:
             mesh.stop()
         if cot_client:

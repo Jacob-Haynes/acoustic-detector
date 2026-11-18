@@ -324,6 +324,14 @@ takes the demo marker off the map: it is re-sent with stale = now, then a `t-x-d
 `__forcedelete` follows, then the registration SA (OTS marks the sender disconnected after a
 delete). It never touches a real detection. `GET /api/demo/scenarios` lists what this unit offers.
 
+**Leftover simulated alerts.** Alert uids sent labelled SIMULATED (a `--simulate` alert, or a
+demo's) are recorded in `sim_markers.json` in the data folder. On shutdown (SIGTERM) they are
+removed from the map the same way, and the TAK queue is flushed (up to 5 s) before the
+connection closes. On a start in `on_demand` they are removed too, so switching the Pi from
+continuous to step by step leaves no old SIM alert behind. With no record yet (the first run of
+this version), that start removes both alert uids once. The sensor's own markers stay, and so
+does a live-mic alert.
+
 ## Tuning knobs
 
 | Env var | Default | Effect |

@@ -100,6 +100,7 @@ class TakClient:
         self.throttled = 0
         self._q: queue.Queue[str] = queue.Queue(maxsize=QUEUE_MAX)
         self._stop = threading.Event()
+        self._sending = False           # a marker taken off the queue but not yet written
         self._thread = threading.Thread(target=self._run, name="tak", daemon=True)
 
     # -- public ------------------------------------------------------------------------------
@@ -135,6 +136,17 @@ class TakClient:
                 pass
             self._q.put_nowait(xml)
         return True
+
+    def flush(self, timeout: float = 5.0) -> bool:
+        """Wait up to `timeout` for queued markers to go out (clean shutdown). False if they didn't."""
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            if self._q.empty() and not self._sending:
+                return True
+            if self._stop.is_set():
+                return False
+            time.sleep(0.05)
+        return self._q.empty() and not self._sending
 
     def registration(self, now: float | None = None) -> str:
         return registration_event(self.uid, self.callsign, self.lat, self.lon, self.hae,
@@ -213,12 +225,15 @@ class TakClient:
                         pending = self._q.get(timeout=0.2)
                     except queue.Empty:
                         continue
+                    self._sending = True
                 sock.sendall(pending.encode("utf-8"))   # raises on a dead socket
                 pending = None
+                self._sending = False
                 self.sent += 1
         finally:
             if pending is not None:
                 self._requeue(pending)                  # resend after the next registration
+            self._sending = False
 
     def _requeue(self, xml: str):
         try:
